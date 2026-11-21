@@ -1,0 +1,317 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Global Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        (
+          request.auth.token.email == 'mhjihad2001@gmail.com' ||
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+    }
+
+    // --- Validation Blueprints (Anti-Update-Gap) ---
+
+    function isValidGeneralSettings(data) {
+      return data.keys().hasAll([
+        'brandName', 'whatsappNumber', 'whatsappRedirectEnabled',
+        'statusMode', 'metaEnabled', 'metaPixelId', 'capiEnabled'
+      ]) &&
+      data.keys().hasOnly([
+        'brandName', 'heritageOrigin', 'logoUrl', 'whatsappNumber',
+        'whatsappRedirectEnabled', 'displayPhone', 'email', 'address',
+        'hoursDisplay', 'openHour', 'openMinute', 'closeHour', 'closeMinute',
+        'statusMode', 'isOpen', 'adminPin', 'mapsCoordinates',
+        'mapsUrl', 'facebookUrl', 'instagramUrl',
+        'metaEnabled', 'metaPixelId', 'capiEnabled', 'metaTestEventCode',
+        'metaDebugConsole', 'updatedAt'
+      ]) &&
+      data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 120 &&
+      (!('heritageOrigin' in data) || (data.heritageOrigin is string && data.heritageOrigin.size() <= 200)) &&
+      (!('logoUrl' in data) || (data.logoUrl is string && data.logoUrl.size() <= 500)) &&
+      data.whatsappNumber is string && data.whatsappNumber.size() >= 8 && data.whatsappNumber.size() <= 25 &&
+      data.whatsappRedirectEnabled is bool &&
+      (!('displayPhone' in data) || (data.displayPhone is string && data.displayPhone.size() <= 30)) &&
+      (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
+      (!('address' in data) || (data.address is string && data.address.size() <= 300)) &&
+      (!('hoursDisplay' in data) || (data.hoursDisplay is string && data.hoursDisplay.size() <= 120)) &&
+      (!('openHour' in data) || (data.openHour is number && data.openHour >= 0 && data.openHour <= 23)) &&
+      (!('openMinute' in data) || (data.openMinute is number && data.openMinute >= 0 && data.openMinute <= 59)) &&
+      (!('closeHour' in data) || (data.closeHour is number && data.closeHour >= 0 && data.closeHour <= 23)) &&
+      (!('closeMinute' in data) || (data.closeMinute is number && data.closeMinute >= 0 && data.closeMinute <= 59)) &&
+      data.statusMode in ['auto', 'open', 'preorder'] &&
+      (!('isOpen' in data) || data.isOpen is bool) &&
+      (!('adminPin' in data) || (data.adminPin is string && data.adminPin.size() >= 4 && data.adminPin.size() <= 20)) &&
+      (!('mapsCoordinates' in data) || (data.mapsCoordinates is string && data.mapsCoordinates.size() <= 80)) &&
+      (!('mapsUrl' in data) || (data.mapsUrl is string && data.mapsUrl.size() <= 500)) &&
+      (!('facebookUrl' in data) || (data.facebookUrl is string && data.facebookUrl.size() <= 500)) &&
+      (!('instagramUrl' in data) || (data.instagramUrl is string && data.instagramUrl.size() <= 500)) &&
+      data.metaEnabled is bool &&
+      data.metaPixelId is string && data.metaPixelId.size() <= 30 &&
+      data.capiEnabled is bool &&
+      (!('metaTestEventCode' in data) || (data.metaTestEventCode is string && data.metaTestEventCode.size() <= 40)) &&
+      (!('metaDebugConsole' in data) || data.metaDebugConsole is bool) &&
+      (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidSiteContent(data) {
+      return data.keys().hasAll([
+        'navbar', 'hero', 'heritage', 'menu', 'catering', 'reviews', 'footer'
+      ]) &&
+      data.keys().hasOnly([
+        'navbar', 'hero', 'heritage', 'menu', 'catering', 'reviews', 'footer', 'updatedAt'
+      ]) &&
+      data.navbar is map &&
+      data.hero is map &&
+      data.heritage is map &&
+      data.menu is map &&
+      data.catering is map &&
+      data.reviews is map &&
+      data.footer is map &&
+      (!('dishes' in data.heritage) || (data.heritage.dishes is list && data.heritage.dishes.size() <= 12 && (data.heritage.dishes.size() == 0 || data.heritage.dishes[0] is map))) &&
+      (!('items' in data.reviews) || (data.reviews.items is list && data.reviews.items.size() <= 20 && (data.reviews.items.size() == 0 || data.reviews.items[0] is map))) &&
+      (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidSecretSettings(data) {
+      return data.keys().hasAll(['capiAccessToken']) &&
+        data.keys().hasOnly(['capiAccessToken', 'capiEndpointUrl', 'updatedAt']) &&
+        data.capiAccessToken is string && data.capiAccessToken.size() <= 512 &&
+        (!('capiEndpointUrl' in data) || (data.capiEndpointUrl is string && data.capiEndpointUrl.size() <= 500)) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidMenuItem(data, itemId) {
+      return data.keys().hasAll([
+        'id', 'name', 'category', 'price', 'available', 'preOrderOnly', 'sortOrder'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'name', 'category', 'description', 'servingSize', 'price',
+        'image', 'available', 'preOrderOnly', 'advanceNotice', 'sortOrder'
+      ]) &&
+      data.id is string && data.id == itemId && isValidId(data.id) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 140 &&
+      data.category in ['স্পেশাল কাচ্চি ও তেহারি', 'কাবাব ও স্টার্টার', 'ডেজার্ট ও পানীয়'] &&
+      (!('description' in data) || (data.description is string && data.description.size() <= 600)) &&
+      (!('servingSize' in data) || (data.servingSize is string && data.servingSize.size() <= 80)) &&
+      data.price is number && data.price >= 0 && data.price <= 500000 &&
+      (!('image' in data) || (data.image is string && data.image.size() <= 500)) &&
+      data.available is bool &&
+      data.preOrderOnly is bool &&
+      (!('advanceNotice' in data) || (data.advanceNotice is string && data.advanceNotice.size() <= 160)) &&
+      data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 10000;
+    }
+
+    function isValidDeliveryZone(data, zoneId) {
+      return data.keys().hasAll([
+        'id', 'name', 'fee', 'eta', 'isOutOfArea', 'sortOrder'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'name', 'fee', 'eta', 'isOutOfArea', 'note', 'sortOrder'
+      ]) &&
+      data.id is string && data.id == zoneId && isValidId(data.id) &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+      data.fee is number && data.fee >= 0 && data.fee <= 10000 &&
+      data.eta is string && data.eta.size() >= 1 && data.eta.size() <= 80 &&
+      data.isOutOfArea is bool &&
+      (!('note' in data) || (data.note is string && data.note.size() <= 300)) &&
+      data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 10000;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+        'orderId', 'customerName', 'customerPhone', 'deliveryZone', 'fullAddress',
+        'orderType', 'preorderDate', 'preorderTimeSlot', 'items',
+        'subtotal', 'deliveryCharge', 'grandTotal', 'status',
+        'metaEventId', 'fbp', 'fbc', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'orderId', 'customerName', 'customerPhone', 'deliveryZone', 'fullAddress',
+        'orderType', 'preorderDate', 'preorderTimeSlot', 'items',
+        'subtotal', 'deliveryCharge', 'grandTotal', 'status',
+        'metaEventId', 'fbp', 'fbc', 'createdAt', 'updatedAt'
+      ]) &&
+      data.orderId is string && data.orderId.size() >= 4 && data.orderId.size() <= 40 &&
+      data.customerName is string && data.customerName.size() >= 2 && data.customerName.size() <= 120 &&
+      data.customerPhone is string && data.customerPhone.size() >= 8 && data.customerPhone.size() <= 25 &&
+      data.deliveryZone is string && data.deliveryZone.size() >= 1 && data.deliveryZone.size() <= 100 &&
+      data.fullAddress is string && data.fullAddress.size() <= 400 &&
+      data.orderType in ['instant', 'preorder'] &&
+      data.preorderDate is string && data.preorderDate.size() <= 20 &&
+      data.preorderTimeSlot is string && data.preorderTimeSlot.size() <= 60 &&
+      data.items is list && data.items.size() >= 1 && data.items.size() <= 30 && data.items[0] is map &&
+      data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 500000 &&
+      data.deliveryCharge is number && data.deliveryCharge >= 0 && data.deliveryCharge <= 10000 &&
+      data.grandTotal is number && data.grandTotal >= 0 && data.grandTotal <= 510000 &&
+      data.status in ['pending', 'preparing', 'out_for_delivery', 'completed'] &&
+      data.metaEventId is string && data.metaEventId.size() <= 80 &&
+      data.fbp is string && data.fbp.size() <= 160 &&
+      data.fbc is string && data.fbc.size() <= 240 &&
+      data.createdAt is timestamp &&
+      (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidOrderTracking(data) {
+      return data.keys().hasAll([
+        'orderId', 'status', 'orderType', 'deliveryZone',
+        'preorderDate', 'preorderTimeSlot', 'itemCount', 'grandTotal',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'orderId', 'status', 'orderType', 'deliveryZone',
+        'preorderDate', 'preorderTimeSlot', 'itemCount', 'grandTotal',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.orderId is string && data.orderId.size() >= 4 && data.orderId.size() <= 40 &&
+      data.status in ['pending', 'preparing', 'out_for_delivery', 'completed'] &&
+      data.orderType in ['instant', 'preorder'] &&
+      data.deliveryZone is string && data.deliveryZone.size() >= 1 && data.deliveryZone.size() <= 100 &&
+      data.preorderDate is string && data.preorderDate.size() <= 20 &&
+      data.preorderTimeSlot is string && data.preorderTimeSlot.size() <= 60 &&
+      data.itemCount is number && data.itemCount >= 1 && data.itemCount <= 500 &&
+      data.grandTotal is number && data.grandTotal >= 0 && data.grandTotal <= 510000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidPhoneIndex(data) {
+      return data.keys().hasAll(['latestOrderId', 'orderIds', 'updatedAt']) &&
+        data.keys().hasOnly(['latestOrderId', 'orderIds', 'updatedAt']) &&
+        isValidId(data.latestOrderId) &&
+        data.orderIds is list && data.orderIds.size() >= 1 && data.orderIds.size() <= 30 &&
+        data.orderIds[0] is string &&
+        data.latestOrderId in data.orderIds &&
+        data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /settings/general {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidGeneralSettings(incoming()) &&
+        (!('updatedAt' in incoming()) || incoming().updatedAt == request.time);
+      allow delete: if false;
+    }
+
+    match /settings/site_content {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidSiteContent(incoming()) &&
+        (!('updatedAt' in incoming()) || incoming().updatedAt == request.time);
+      allow delete: if false;
+    }
+
+    match /settings/secrets {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && isValidSecretSettings(incoming()) &&
+        (!('updatedAt' in incoming()) || incoming().updatedAt == request.time);
+      allow delete: if isAdmin();
+    }
+
+    match /menu_items/{itemId} {
+      allow get: if isValidId(itemId) && (resource == null || existing().name is string);
+      allow list: if existing().sortOrder >= 0;
+      allow create, update: if isAdmin() && isValidId(itemId) && isValidMenuItem(incoming(), itemId);
+      allow delete: if isAdmin() && isValidId(itemId);
+    }
+
+    match /delivery_zones/{zoneId} {
+      allow get: if isValidId(zoneId) && (resource == null || existing().name is string);
+      allow list: if existing().sortOrder >= 0;
+      allow create, update: if isAdmin() && isValidId(zoneId) && isValidDeliveryZone(incoming(), zoneId);
+      allow delete: if isAdmin() && isValidId(zoneId);
+    }
+
+    match /orders/{orderDocId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(orderDocId) &&
+        isValidOrder(incoming()) &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(orderDocId) &&
+        isValidOrder(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(orderDocId);
+    }
+
+    match /order_tracking/{trackingId} {
+      allow get: if isValidId(trackingId);
+      allow list: if false;
+      allow create: if isValidId(trackingId) &&
+        isValidOrderTracking(incoming()) &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/orders/$(trackingId));
+      allow update: if isAdmin() &&
+        isValidId(trackingId) &&
+        isValidOrderTracking(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(trackingId);
+    }
+
+    match /phone_order_index/{phoneHash} {
+      allow get: if isValidId(phoneHash) && phoneHash.size() == 64;
+      allow list: if false;
+      allow create: if isValidId(phoneHash) &&
+        phoneHash.size() == 64 &&
+        isValidPhoneIndex(incoming()) &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/orders/$(incoming().latestOrderId));
+      allow update: if isValidId(phoneHash) &&
+        phoneHash.size() == 64 &&
+        isValidPhoneIndex(incoming()) &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['latestOrderId', 'orderIds', 'updatedAt'])) ||
+          (
+            incoming().orderIds.hasAll(existing().orderIds) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['latestOrderId', 'orderIds', 'updatedAt']) &&
+            existsAfter(/databases/$(database)/documents/orders/$(incoming().latestOrderId))
+          )
+        );
+      allow delete: if isAdmin() && isValidId(phoneHash);
+    }
+
+    match /admins/{uid} {
+      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+      allow list, write: if false;
+    }
+  }
+}

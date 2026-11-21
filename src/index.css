@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Noto Serif Bengali", Georgia, Cambria, "Times New Roman", serif;
+  --font-sans: "Hind Siliguri", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-emerald-deep: #111815;
+  --color-emerald-surface: #18221D;
+  --color-ivory-warm: #FAF6F0;
+  --color-ivory-card: #FFFDF9;
+  --color-gold-royal: #C5A059;
+  --color-gold-hover: #D4B26E;
+  --color-ink-dark: #161E1A;
+  --color-ink-muted: #525B56;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-serif);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

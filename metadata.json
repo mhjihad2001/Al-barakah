@@ -1,0 +1,6 @@
+{
+  "name": "Nawab's Dastarkhwan",
+  "description": "Heritage Kacchi, Old Dhaka Tehari, Charcoal Kebabs & Royal Desserts with zone-based delivery and WhatsApp pre-order.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
