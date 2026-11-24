@@ -1,4 +1,4 @@
-import { Clock, ExternalLink, Mail, MapPin, Phone, Settings, Star } from 'lucide-react';
+import { Clock, ExternalLink, Mail, MapPin, Phone, Star } from 'lucide-react';
 import {
   DEFAULT_SITE_CONTENT,
   type RestaurantInfo,
@@ -10,7 +10,6 @@ interface ReviewsAndFooterProps {
   restaurantInfo: RestaurantInfo;
   reviewsContent?: SiteContent['reviews'];
   footerContent?: SiteContent['footer'];
-  onOpenAdmin: () => void;
   onOpenTracking: () => void;
 }
 
@@ -18,7 +17,6 @@ export function ReviewsAndFooter({
   restaurantInfo,
   reviewsContent = DEFAULT_SITE_CONTENT.reviews,
   footerContent = DEFAULT_SITE_CONTENT.footer,
-  onOpenAdmin,
   onOpenTracking,
 }: ReviewsAndFooterProps) {
   return (
@@ -277,16 +275,6 @@ export function ReviewsAndFooter({
             </p>
             <div className="flex flex-wrap items-center gap-4">
               <span>{footerContent.bottomNote}</span>
-              <button
-                type="button"
-                onClick={onOpenAdmin}
-                data-testid="admin-gear-button"
-                aria-label="অ্যাডমিন কনফিগারেশন প্যানেল খুলুন"
-                className="inline-flex items-center gap-1.5 rounded border border-white/15 px-2.5 py-1.5 text-xs text-[#FAF6F0]/75 hover:border-[#C5A059]/60 hover:text-[#C5A059] transition-colors cursor-pointer"
-              >
-                <Settings className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>অ্যাডমিন প্যানেল</span>
-              </button>
             </div>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Activity,
+  ArrowLeft,
   Check,
   Copy,
   Download,
@@ -36,6 +37,7 @@ import { AdminPageCopyEditor } from './AdminPageCopyEditor';
 
 interface AdminModalProps {
   isOpen: boolean;
+  asPage?: boolean;
   onClose: () => void;
   config: AppConfig;
   onUpdateConfig: (next: AppConfig) => void;
@@ -69,6 +71,7 @@ const CATEGORY_OPTIONS: MenuCategory[] = [
 
 export function AdminModal({
   isOpen,
+  asPage = false,
   onClose,
   config,
   onUpdateConfig,
@@ -82,7 +85,7 @@ export function AdminModal({
   onUpdateOrderStatus,
   onSaveSecretsToFirestore,
 }: AdminModalProps) {
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(asPage);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [activeTab, setActiveTab] = useState<AdminTab>('general');
@@ -126,13 +129,13 @@ export function AdminModal({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || asPage) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, asPage, onClose]);
 
   if (!isOpen) return null;
 
@@ -327,40 +330,63 @@ export function AdminModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
-      role="dialog"
-      aria-modal="true"
+      className={
+        asPage
+          ? 'min-h-screen w-full bg-[#111815] p-3 sm:p-6 md:p-8 flex flex-col items-center'
+          : 'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6'
+      }
+      role={asPage ? 'main' : 'dialog'}
+      aria-modal={asPage ? undefined : true}
       aria-labelledby="admin-modal-title"
     >
-      <div
-        onClick={onClose}
-        className="fixed inset-0 bg-black/75 backdrop-blur-xs"
-        aria-hidden="true"
-      />
+      {!asPage && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 bg-black/75 backdrop-blur-xs"
+          aria-hidden="true"
+        />
+      )}
 
-      <div className="relative z-10 flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#C5A059]/40 bg-[#FAF6F0] text-[#161E1A] shadow-2xl">
+      <div
+        className={
+          asPage
+            ? 'relative z-10 flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-[#C5A059]/35 bg-[#FAF6F0] text-[#161E1A] shadow-2xl'
+            : 'relative z-10 flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-[#C5A059]/40 bg-[#FAF6F0] text-[#161E1A] shadow-2xl'
+        }
+      >
         {/* Top Admin Header */}
-        <div className="flex items-center justify-between border-b border-[#C5A059]/25 bg-[#111815] px-5 py-4 text-[#FAF6F0]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#C5A059]/25 bg-[#111815] px-5 py-4 text-[#FAF6F0]">
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="h-5 w-5 text-[#C5A059]" aria-hidden="true" />
             <div>
-              <h2 id="admin-modal-title" className="font-serif text-lg font-semibold sm:text-xl">
-                অ্যাডমিন কনফিগারেশন প্যানেল
-              </h2>
+              <h1 id="admin-modal-title" className="font-serif text-lg font-semibold sm:text-xl">
+                {config.restaurantInfo.brandName} — অ্যাডমিন প্যানেল
+              </h1>
               <p className="text-xs text-[#FAF6F0]/70">
-                সব পরিবর্তন স্বয়ংক্রিয়ভাবে ব্রাউজারে সংরক্ষিত হয়
+                সব পরিবর্তন স্বয়ংক্রিয়ভাবে সংরক্ষিত ও লাইভ সিঙ্ক হয়
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="অ্যাডমিন প্যানেল বন্ধ করুন"
-            className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-md border border-white/15 text-[#FAF6F0] hover:bg-white/10 cursor-pointer"
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
+          {asPage ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-md border border-[#C5A059]/40 bg-white/5 px-3.5 py-2 text-xs font-semibold text-[#FAF6F0] hover:border-[#C5A059] hover:text-[#C5A059] transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              <span>মূল ওয়েবসাইটে যান</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="অ্যাডমিন প্যানেল বন্ধ করুন"
+              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-md border border-white/15 text-[#FAF6F0] hover:bg-white/10 cursor-pointer"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          )}
         </div>
 
         {!unlocked ? (

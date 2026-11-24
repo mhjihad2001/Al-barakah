@@ -59,6 +59,25 @@ declare global {
   }
 }
 
+function isAdminRouteLocation(): boolean {
+  const cleanPath = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+  const cleanHash = window.location.hash
+    .replace(/^#\/?/, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  const params = new URLSearchParams(window.location.search);
+  const queryAdmin =
+    params.get('admin') === '1' ||
+    params.get('admin') === 'true' ||
+    params.get('panel')?.toLowerCase() === 'admin';
+  return (
+    cleanPath === '/admin' ||
+    cleanPath.endsWith('/admin') ||
+    cleanHash === 'admin' ||
+    queryAdmin
+  );
+}
+
 export default function App() {
   const [config, setConfig] = useState<AppConfig>(() => loadAppConfig());
   const [orders, setOrders] = useState<SavedOrderRecord[]>(() => loadSavedOrders());
@@ -70,7 +89,7 @@ export default function App() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [orderType, setOrderType] = useState<OrderType>('instant');
   const [cartOpen, setCartOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
+  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() => isAdminRouteLocation());
   const [trackingOpen, setTrackingOpen] = useState(false);
   const [trackingOrderId, setTrackingOrderId] = useState<string | undefined>(undefined);
   const [inspectedDish, setInspectedDish] = useState<MenuItem | null>(null);
@@ -88,14 +107,18 @@ export default function App() {
   );
   const totalItems = cartItems.reduce((sum, entry) => sum + entry.quantity, 0);
 
-  // Keep browser tab title synced with editable brand name & tagline
+  // Keep browser tab title synced with editable brand name & current route
   useEffect(() => {
+    if (isAdminRoute) {
+      document.title = `অ্যাডমিন প্যানেল — ${config.restaurantInfo.brandName}`;
+      return;
+    }
     if (config.restaurantInfo.brandName.trim()) {
       document.title = config.restaurantInfo.heritageOrigin.trim()
         ? `${config.restaurantInfo.brandName} — ${config.restaurantInfo.heritageOrigin}`
         : config.restaurantInfo.brandName;
     }
-  }, [config.restaurantInfo.brandName, config.restaurantInfo.heritageOrigin]);
+  }, [isAdminRoute, config.restaurantInfo.brandName, config.restaurantInfo.heritageOrigin]);
 
   // Register Cloud Function CAPI dispatcher & console seedInitialData helper
   useEffect(() => {
@@ -157,21 +180,21 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Subscribe to live Firestore orders when Admin is authenticated & Admin modal is open
+  // Subscribe to live Firestore orders when Admin is authenticated on the /admin route
   useEffect(() => {
-    if (!adminUser || !adminUser.emailVerified || !adminOpen) {
+    if (!adminUser || !adminUser.emailVerified || !isAdminRoute) {
       return;
     }
     const unsub = subscribeToAdminOrders((liveOrders) => {
       setFirestoreOrders(liveOrders);
     });
     return () => unsub();
-  }, [adminUser, adminOpen]);
+  }, [adminUser, isAdminRoute]);
 
-  // Sync MetaTracker configuration & fire initial PageView once
+  // Sync MetaTracker configuration & fire initial PageView once on customer storefront
   useEffect(() => {
     MetaTracker.init(config.metaConfig);
-    if (!pageViewFiredRef.current) {
+    if (!isAdminRoute && !pageViewFiredRef.current) {
       pageViewFiredRef.current = true;
       void MetaTracker.track('PageView', {
         content_name: config.restaurantInfo.brandName,
@@ -181,19 +204,25 @@ export default function App() {
         page_title: config.restaurantInfo.brandName,
       });
     }
-  }, [config.metaConfig, config.restaurantInfo.brandName]);
+  }, [isAdminRoute, config.metaConfig, config.restaurantInfo.brandName]);
 
-  // Listen for #admin hash in URL
+  // Sync route state when navigating via browser history (/admin) or hash (#admin)
   useEffect(() => {
-    const checkHash = () => {
-      if (window.location.hash === '#admin') {
-        setAdminOpen(true);
-      }
+    const syncRoute = () => {
+      setIsAdminRoute(isAdminRouteLocation());
     };
-    checkHash();
-    window.addEventListener('hashchange', checkHash);
-    return () => window.removeEventListener('hashchange', checkHash);
+    window.addEventListener('popstate', syncRoute);
+    window.addEventListener('hashchange', syncRoute);
+    return () => {
+      window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener('hashchange', syncRoute);
+    };
   }, []);
+
+  const handleExitAdminRoute = () => {
+    window.history.pushState(null, '', '/');
+    setIsAdminRoute(false);
+  };
 
   const syncConfigDiffToFirestore = async (prev: AppConfig, next: AppConfig) => {
     if (!adminUser?.emailVerified) return;
@@ -462,6 +491,29 @@ export default function App() {
     }
   };
 
+  if (isAdminRoute) {
+    return (
+      <AdminModal
+        isOpen={true}
+        asPage={true}
+        onClose={handleExitAdminRoute}
+        config={config}
+        onUpdateConfig={handleUpdateConfig}
+        onResetDefaults={handleResetDefaults}
+        orders={orders}
+        firestoreOrders={firestoreOrders}
+        adminUserEmail={adminUser?.email ?? null}
+        onSignInAdmin={async () => {
+          await signInAdminWithGoogle();
+        }}
+        onSignOutAdmin={signOutAdmin}
+        onSeedFirestore={() => seedInitialData(config)}
+        onUpdateOrderStatus={handleUpdateOrderStatus}
+        onSaveSecretsToFirestore={saveSecretSettingsToFirestore}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#111815] text-[#FAF6F0]">
       <Navbar
@@ -512,7 +564,6 @@ export default function App() {
         restaurantInfo={config.restaurantInfo}
         reviewsContent={config.siteContent.reviews}
         footerContent={config.siteContent.footer}
-        onOpenAdmin={() => setAdminOpen(true)}
         onOpenTracking={() => handleOpenTracking()}
       />
 
@@ -544,33 +595,6 @@ export default function App() {
         onClose={() => setTrackingOpen(false)}
         initialOrderId={trackingOrderId}
         localOrders={orders}
-      />
-
-      <AdminModal
-        isOpen={adminOpen}
-        onClose={() => {
-          setAdminOpen(false);
-          if (window.location.hash === '#admin') {
-            window.history.replaceState(
-              null,
-              '',
-              window.location.pathname + window.location.search
-            );
-          }
-        }}
-        config={config}
-        onUpdateConfig={handleUpdateConfig}
-        onResetDefaults={handleResetDefaults}
-        orders={orders}
-        firestoreOrders={firestoreOrders}
-        adminUserEmail={adminUser?.email ?? null}
-        onSignInAdmin={async () => {
-          await signInAdminWithGoogle();
-        }}
-        onSignOutAdmin={signOutAdmin}
-        onSeedFirestore={() => seedInitialData(config)}
-        onUpdateOrderStatus={handleUpdateOrderStatus}
-        onSaveSecretsToFirestore={saveSecretSettingsToFirestore}
       />
     </div>
   );
