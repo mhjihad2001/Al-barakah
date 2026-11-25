@@ -86,6 +86,12 @@ export default function App() {
   const [selectedZoneId, setSelectedZoneId] = useState<string>(
     () => loadAppConfig().deliveryZones[0]?.id ?? CONFIG_DEFAULTS.deliveryZones[0].id
   );
+  const [selectedSubAreaId, setSelectedSubAreaId] = useState<string>(
+    () =>
+      loadAppConfig().deliveryZones[0]?.subAreas?.[0]?.id ??
+      CONFIG_DEFAULTS.deliveryZones[0]?.subAreas?.[0]?.id ??
+      ''
+  );
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [orderType, setOrderType] = useState<OrderType>('instant');
   const [cartOpen, setCartOpen] = useState(false);
@@ -99,6 +105,14 @@ export default function App() {
   const selectedZone =
     config.deliveryZones.find((z) => z.id === selectedZoneId) ??
     config.deliveryZones[0];
+
+  const availableSubAreas = !selectedZone.isOutOfArea
+    ? (selectedZone.subAreas ?? [])
+    : [];
+  const selectedSubArea =
+    availableSubAreas.find((s) => s.id === selectedSubAreaId) ??
+    availableSubAreas[0] ??
+    null;
 
   const liveStatus = getRestaurantLiveStatus(
     new Date(),
@@ -297,6 +311,7 @@ export default function App() {
   const handleSelectZone = (zoneId: string) => {
     setSelectedZoneId(zoneId);
     const zone = config.deliveryZones.find((z) => z.id === zoneId);
+    setSelectedSubAreaId(zone?.subAreas?.[0]?.id ?? '');
     if (zone) {
       void MetaTracker.track('SelectDeliveryZone', {
         zone_name: zone.name,
@@ -312,9 +327,27 @@ export default function App() {
     }
   };
 
+  const handleSelectSubArea = (subAreaId: string) => {
+    setSelectedSubAreaId(subAreaId);
+    const sub = selectedZone.subAreas?.find((s) => s.id === subAreaId);
+    if (sub) {
+      const fee = typeof sub.fee === 'number' ? sub.fee : selectedZone.fee;
+      void MetaTracker.track('SelectDeliveryZone', {
+        zone_name: `${selectedZone.name} — ${sub.name}`,
+        delivery_fee: fee,
+        currency: 'BDT',
+      });
+    }
+  };
+
   const handleOpenCart = () => {
     setCartOpen(true);
-    const summary = computeOrderSummary(cartItems, selectedZone, orderType);
+    const summary = computeOrderSummary(
+      cartItems,
+      selectedZone,
+      orderType,
+      selectedSubArea
+    );
     if (cartItems.length > 0) {
       void MetaTracker.track('InitiateCheckout', {
         content_ids: cartItems.map((c) => c.item.id),
@@ -531,7 +564,9 @@ export default function App() {
           deliveryZones={config.deliveryZones}
           liveStatus={liveStatus}
           selectedZone={selectedZone}
+          selectedSubArea={selectedSubArea}
           onSelectZone={handleSelectZone}
+          onSelectSubArea={handleSelectSubArea}
           onStartPreOrder={handleStartPreOrder}
           onOpenTracking={() => handleOpenTracking()}
         />
@@ -583,7 +618,9 @@ export default function App() {
         onUpdateQuantity={handleUpdateQuantity}
         onRemoveItem={handleRemoveItem}
         selectedZone={selectedZone}
+        selectedSubArea={selectedSubArea}
         onSelectZone={handleSelectZone}
+        onSelectSubArea={handleSelectSubArea}
         orderType={orderType}
         onChangeOrderType={setOrderType}
         onOrderConfirmed={handleOrderConfirmed}

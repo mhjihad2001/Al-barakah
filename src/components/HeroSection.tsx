@@ -1,11 +1,17 @@
 import { ArrowRight, Clock, MapPin, Truck } from 'lucide-react';
 import {
   DEFAULT_SITE_CONTENT,
+  type DeliverySubArea,
   type DeliveryZone,
   type RestaurantInfo,
   type SiteContent,
 } from '../data/restaurantConfig';
-import { formatBDT, type RestaurantLiveStatus } from '../utils/orderLogic';
+import {
+  formatBDT,
+  getEffectiveDeliveryEta,
+  getEffectiveDeliveryFee,
+  type RestaurantLiveStatus,
+} from '../utils/orderLogic';
 
 interface HeroSectionProps {
   restaurantInfo: RestaurantInfo;
@@ -13,7 +19,9 @@ interface HeroSectionProps {
   deliveryZones: DeliveryZone[];
   liveStatus: RestaurantLiveStatus;
   selectedZone: DeliveryZone;
+  selectedSubArea?: DeliverySubArea | null;
   onSelectZone: (zoneId: string) => void;
+  onSelectSubArea?: (subAreaId: string) => void;
   onStartPreOrder: () => void;
   onOpenTracking: () => void;
 }
@@ -24,10 +32,15 @@ export function HeroSection({
   deliveryZones,
   liveStatus,
   selectedZone,
+  selectedSubArea = null,
   onSelectZone,
+  onSelectSubArea,
   onStartPreOrder,
   onOpenTracking,
 }: HeroSectionProps) {
+  const subAreas = !selectedZone.isOutOfArea ? (selectedZone.subAreas ?? []) : [];
+  const effectiveFee = getEffectiveDeliveryFee(selectedZone, selectedSubArea);
+  const effectiveEta = getEffectiveDeliveryEta(selectedZone, selectedSubArea);
   return (
     <section
       id="top"
@@ -141,6 +154,31 @@ export function HeroSection({
                     </option>
                   ))}
                 </select>
+
+                {subAreas.length > 0 && onSelectSubArea && (
+                  <div className="mt-3.5">
+                    <label
+                      htmlFor="hero-delivery-subarea"
+                      className="block text-xs font-semibold tracking-wide text-[#FAF6F0]/80"
+                    >
+                      উপ-এলাকা / মহল্লা নির্বাচন করুন
+                    </label>
+                    <select
+                      id="hero-delivery-subarea"
+                      data-testid="hero-subarea-select"
+                      value={selectedSubArea?.id ?? subAreas[0].id}
+                      onChange={(e) => onSelectSubArea(e.target.value)}
+                      className="mt-1.5 block w-full min-h-[44px] rounded-lg border border-white/20 bg-[#111815] px-3.5 py-2 text-sm font-medium text-[#FAF6F0] focus:border-[#C5A059] focus:outline-none focus:ring-1 focus:ring-[#C5A059]"
+                    >
+                      {subAreas.map((sub) => (
+                        <option key={sub.id} value={sub.id}>
+                          {sub.name}
+                          {typeof sub.fee === 'number' ? ` — ${formatBDT(sub.fee)}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Dynamic Zone Output */}
@@ -181,7 +219,7 @@ export function HeroSection({
                         data-testid="hero-zone-fee"
                         className="mt-1 block text-lg font-semibold text-[#C5A059] tabular-nums"
                       >
-                        {formatBDT(selectedZone.fee)}
+                        {formatBDT(effectiveFee)}
                       </span>
                     </div>
                     <div>
@@ -191,7 +229,7 @@ export function HeroSection({
                         className="mt-1 inline-flex items-center gap-1.5 text-base font-semibold text-[#FAF6F0] tabular-nums"
                       >
                         <Truck className="h-4 w-4 text-[#C5A059]" aria-hidden="true" />
-                        <span>{selectedZone.eta}</span>
+                        <span>{effectiveEta}</span>
                       </span>
                     </div>
                   </div>

@@ -20,6 +20,7 @@ import { httpsCallable } from 'firebase/functions';
 import {
   type AppConfig,
   CONFIG_DEFAULTS,
+  type DeliverySubArea,
   type DeliveryZone,
   type MenuItem,
   type MetaTrackingConfig,
@@ -64,6 +65,50 @@ export interface OrderTrackingRecord {
 
 function clampStr(value: unknown, maxLen: number): string {
   return String(value ?? '').trim().slice(0, maxLen);
+}
+
+function parseSubAreas(raw: unknown): DeliverySubArea[] {
+  if (!Array.isArray(raw)) return [];
+  const result: DeliverySubArea[] = [];
+  for (let i = 0; i < Math.min(raw.length, 25); i++) {
+    const entry = raw[i];
+    if (!entry || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const name = clampStr(obj.name, 80);
+    if (!name) continue;
+    const sub: DeliverySubArea = {
+      id: clampStr(obj.id, 64) || `sub-${i + 1}`,
+      name,
+    };
+    if (typeof obj.fee === 'number' && Number.isFinite(obj.fee)) {
+      sub.fee = Math.max(0, Math.min(10000, obj.fee));
+    }
+    if (typeof obj.eta === 'string' && obj.eta.trim()) {
+      sub.eta = clampStr(obj.eta, 60);
+    }
+    result.push(sub);
+  }
+  return result;
+}
+
+function sanitizeSubAreasPayload(subAreas?: DeliverySubArea[]): Array<Record<string, unknown>> {
+  if (!Array.isArray(subAreas)) return [];
+  return subAreas
+    .filter((s) => s && typeof s.name === 'string' && s.name.trim().length > 0)
+    .slice(0, 25)
+    .map((s, idx) => {
+      const clean: Record<string, unknown> = {
+        id: clampStr(s.id, 64) || `sub-${idx + 1}`,
+        name: clampStr(s.name, 80),
+      };
+      if (typeof s.fee === 'number' && Number.isFinite(s.fee)) {
+        clean.fee = Math.max(0, Math.min(10000, s.fee));
+      }
+      if (typeof s.eta === 'string' && s.eta.trim()) {
+        clean.eta = clampStr(s.eta, 60);
+      }
+      return clean;
+    });
 }
 
 function timestampToIso(ts: unknown): string {
@@ -223,6 +268,7 @@ export function subscribeToStorefrontConfig(handlers: {
             eta: String(d.eta ?? ''),
             isOutOfArea: Boolean(d.isOutOfArea),
             note: d.note ? String(d.note) : undefined,
+            subAreas: parseSubAreas(d.subAreas),
             sortOrder: Number(d.sortOrder ?? 0),
           };
         });
@@ -677,6 +723,7 @@ export async function upsertDeliveryZoneToFirestore(
     fee: Math.max(0, Math.min(10000, Number(zone.fee || 0))),
     eta: clampStr(zone.eta, 80) || '৩০–৪০ মিনিট',
     isOutOfArea: Boolean(zone.isOutOfArea),
+    subAreas: sanitizeSubAreasPayload(zone.subAreas),
     sortOrder: Math.max(0, Math.min(10000, Number(sortOrder))),
   };
   if (zone.note) {
@@ -778,6 +825,7 @@ export async function seedInitialData(
         fee: Math.max(0, Number(zone.fee || 0)),
         eta: clampStr(zone.eta, 80),
         isOutOfArea: Boolean(zone.isOutOfArea),
+        subAreas: sanitizeSubAreasPayload(zone.subAreas),
         sortOrder: zone.sortOrder ?? index + 1,
       };
       if (zone.note) {

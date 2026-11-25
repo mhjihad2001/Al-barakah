@@ -19,6 +19,7 @@ import {
   type AppConfig,
   CONFIG_DEFAULTS,
   DEFAULT_SITE_CONTENT,
+  type DeliverySubArea,
   type DeliveryZone,
   type MenuCategory,
   type MenuItem,
@@ -111,6 +112,9 @@ export function AdminModal({
   const [newZoneEta, setNewZoneEta] = useState('৪০–৫০ মিনিট');
   const [newZoneNote, setNewZoneNote] = useState('');
   const [newZoneOutOfArea, setNewZoneOutOfArea] = useState(false);
+  const [subAreaDrafts, setSubAreaDrafts] = useState<
+    Record<string, { name: string; fee: string; eta: string }>
+  >({});
 
   // Meta Debugger Logs
   const [metaLogs, setMetaLogs] = useState<MetaEventLogEntry[]>([]);
@@ -264,6 +268,76 @@ export function AdminModal({
       deliveryZones: config.deliveryZones.filter((z) => z.id !== id),
     });
     flashBanner('ডেলিভারি জোন মুছে ফেলা হয়েছে।');
+  };
+
+  const getSubAreaDraft = (zoneId: string) =>
+    subAreaDrafts[zoneId] ?? { name: '', fee: '', eta: '' };
+
+  const setSubAreaDraftField = (
+    zoneId: string,
+    field: 'name' | 'fee' | 'eta',
+    value: string
+  ) => {
+    setSubAreaDrafts((prev) => ({
+      ...prev,
+      [zoneId]: {
+        ...(prev[zoneId] ?? { name: '', fee: '', eta: '' }),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleAddSubArea = (zoneId: string) => {
+    const draft = getSubAreaDraft(zoneId);
+    const cleanName = draft.name.trim();
+    if (!cleanName) return;
+    const zone = config.deliveryZones.find((z) => z.id === zoneId);
+    if (!zone) return;
+    const existing = zone.subAreas ?? [];
+    if (existing.length >= 25) {
+      flashBanner('একটি এলাকার অধীনে সর্বোচ্চ ২৫টি উপ-এলাকা যোগ করা যাবে।');
+      return;
+    }
+
+    const parsedFee =
+      draft.fee.trim() !== '' && Number.isFinite(Number(draft.fee))
+        ? Math.max(0, Number(draft.fee))
+        : undefined;
+    const newSub: DeliverySubArea = {
+      id: `sub-${Date.now()}`,
+      name: cleanName,
+      ...(parsedFee !== undefined ? { fee: parsedFee } : {}),
+      ...(draft.eta.trim() ? { eta: draft.eta.trim() } : {}),
+    };
+
+    handleUpdateZone(zoneId, { subAreas: [...existing, newSub] });
+    setSubAreaDrafts((prev) => ({
+      ...prev,
+      [zoneId]: { name: '', fee: '', eta: '' },
+    }));
+    flashBanner(`"${cleanName}" উপ-এলাকা যোগ করা হয়েছে।`);
+  };
+
+  const handleUpdateSubArea = (
+    zoneId: string,
+    subAreaId: string,
+    patch: Partial<DeliverySubArea>
+  ) => {
+    const zone = config.deliveryZones.find((z) => z.id === zoneId);
+    if (!zone) return;
+    const updated = (zone.subAreas ?? []).map((sub) =>
+      sub.id === subAreaId ? { ...sub, ...patch } : sub
+    );
+    handleUpdateZone(zoneId, { subAreas: updated });
+  };
+
+  const handleDeleteSubArea = (zoneId: string, subAreaId: string) => {
+    const zone = config.deliveryZones.find((z) => z.id === zoneId);
+    if (!zone) return;
+    handleUpdateZone(zoneId, {
+      subAreas: (zone.subAreas ?? []).filter((sub) => sub.id !== subAreaId),
+    });
+    flashBanner('উপ-এলাকা মুছে ফেলা হয়েছে।');
   };
 
   const handleSendTestEvent = async () => {
@@ -1289,6 +1363,132 @@ export function AdminModal({
                           aria-label={`${zone.name} নোট`}
                           className="w-full min-h-[34px] rounded border border-[#111815]/15 bg-white px-2.5 text-xs text-[#525B56]"
                         />
+
+                        {/* Sub-Areas Manager under this Zone */}
+                        {!zone.isOutOfArea && (
+                          <div className="mt-2 rounded-md border border-[#111815]/10 bg-[#FAF6F0]/75 p-3 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-[#111815]">
+                                উপ-এলাকাসমূহ / মহল্লা ({toBengaliDigits((zone.subAreas ?? []).length)} টি)
+                              </span>
+                              <span className="text-[11px] text-[#525B56]">
+                                আলাদা চার্জ ফাঁকা রাখলে মূল এলাকার চার্জ ({formatBDT(zone.fee)}) প্রযোজ্য হবে
+                              </span>
+                            </div>
+
+                            {(zone.subAreas ?? []).length > 0 && (
+                              <div className="space-y-2">
+                                {(zone.subAreas ?? []).map((sub) => (
+                                  <div
+                                    key={sub.id}
+                                    className="flex flex-wrap items-center gap-2 rounded border border-[#111815]/10 bg-white px-2.5 py-2"
+                                  >
+                                    <input
+                                      type="text"
+                                      value={sub.name}
+                                      onChange={(e) =>
+                                        handleUpdateSubArea(zone.id, sub.id, {
+                                          name: e.target.value,
+                                        })
+                                      }
+                                      aria-label={`${zone.name} উপ-এলাকার নাম`}
+                                      className="min-h-[34px] flex-1 min-w-[140px] rounded border border-[#111815]/20 bg-white px-2.5 text-xs font-medium"
+                                    />
+                                    <label className="inline-flex items-center gap-1 text-[11px] text-[#525B56]">
+                                      <span>চার্জ ৳</span>
+                                      <input
+                                        type="number"
+                                        value={typeof sub.fee === 'number' ? sub.fee : ''}
+                                        placeholder={String(zone.fee)}
+                                        onChange={(e) => {
+                                          const raw = e.target.value.trim();
+                                          handleUpdateSubArea(zone.id, sub.id, {
+                                            fee:
+                                              raw === ''
+                                                ? undefined
+                                                : Math.max(0, Number(raw) || 0),
+                                          });
+                                        }}
+                                        aria-label={`${sub.name} চার্জ`}
+                                        className="w-18 rounded border border-[#111815]/20 bg-white px-2 py-1 text-xs tabular-nums"
+                                      />
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={sub.eta ?? ''}
+                                      placeholder={zone.eta}
+                                      onChange={(e) =>
+                                        handleUpdateSubArea(zone.id, sub.id, {
+                                          eta: e.target.value.trim()
+                                            ? e.target.value
+                                            : undefined,
+                                        })
+                                      }
+                                      aria-label={`${sub.name} আনুমানিক সময়`}
+                                      className="min-h-[32px] w-32 rounded border border-[#111815]/20 bg-white px-2 text-xs"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteSubArea(zone.id, sub.id)}
+                                      aria-label={`${sub.name} উপ-এলাকা মুছুন`}
+                                      className="rounded p-1 text-red-700 hover:bg-red-50 cursor-pointer"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Add Sub-Area Inline Row */}
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <input
+                                type="text"
+                                value={getSubAreaDraft(zone.id).name}
+                                onChange={(e) =>
+                                  setSubAreaDraftField(zone.id, 'name', e.target.value)
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddSubArea(zone.id);
+                                  }
+                                }}
+                                placeholder="নতুন উপ-এলাকার নাম (যেমন: বাজার রোড)"
+                                aria-label={`${zone.name} নতুন উপ-এলাকার নাম`}
+                                className="min-h-[34px] flex-1 min-w-[160px] rounded border border-[#111815]/20 bg-white px-2.5 text-xs"
+                              />
+                              <input
+                                type="number"
+                                value={getSubAreaDraft(zone.id).fee}
+                                onChange={(e) =>
+                                  setSubAreaDraftField(zone.id, 'fee', e.target.value)
+                                }
+                                placeholder={`চার্জ (ঐচ্ছিক)`}
+                                aria-label={`${zone.name} নতুন উপ-এলাকার চার্জ`}
+                                className="min-h-[34px] w-28 rounded border border-[#111815]/20 bg-white px-2 text-xs tabular-nums"
+                              />
+                              <input
+                                type="text"
+                                value={getSubAreaDraft(zone.id).eta}
+                                onChange={(e) =>
+                                  setSubAreaDraftField(zone.id, 'eta', e.target.value)
+                                }
+                                placeholder="সময় (ঐচ্ছিক)"
+                                aria-label={`${zone.name} নতুন উপ-এলাকার সময়`}
+                                className="min-h-[34px] w-28 rounded border border-[#111815]/20 bg-white px-2 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAddSubArea(zone.id)}
+                                className="inline-flex min-h-[34px] items-center gap-1 rounded bg-[#111815] px-3 py-1.5 text-xs font-semibold text-[#C5A059] hover:bg-[#1E2B25] cursor-pointer"
+                              >
+                                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                                <span>উপ-এলাকা যোগ করুন</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

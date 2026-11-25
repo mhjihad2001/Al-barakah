@@ -156,7 +156,11 @@ test('validateOrderForm and WhatsApp receipt generation work with Bengali & ASCI
 });
 
 import {
+  formatWhatsAppOrderMessage,
+  formatZoneDisplayName,
   generateOrderId,
+  getEffectiveDeliveryEta,
+  getEffectiveDeliveryFee,
   mergeSiteContent,
   normalizeTrackingOrderId,
   ORDER_STATUS_LABELS,
@@ -197,5 +201,43 @@ test('mergeSiteContent merges partial page copy overrides safely and preserves d
   const customStatus = getRestaurantLiveStatus(openAfternoon, restaurantInfo, merged.hero);
   assert.equal(customStatus.badgeText, 'লাইভ কিচেন চালু');
 });
+
+test('sub-area overrides delivery fee, ETA, order summary, and WhatsApp receipt cleanly', () => {
+  const kacchi = menuItems.find((m) => m.id === 'royal-mutton-kacchi-1-1')!;
+  const sahebabad = deliveryZones.find((z) => z.id === 'sahebabad')!;
+  const bazar = sahebabad.subAreas!.find((s) => s.id === 'sahebabad-bazar')!;
+  const dokkhin = sahebabad.subAreas!.find((s) => s.id === 'sahebabad-dokkhin-para')!;
+
+  // Sub-area without custom fee inherits parent zone fee (50)
+  assert.equal(getEffectiveDeliveryFee(sahebabad, bazar), 50);
+  assert.equal(getEffectiveDeliveryEta(sahebabad, bazar), sahebabad.eta);
+  assert.equal(formatZoneDisplayName(sahebabad, bazar), 'সাহেবাবাদ — সাহেবাবাদ বাজার');
+
+  // Sub-area with custom fee overrides parent fee (55)
+  assert.equal(getEffectiveDeliveryFee(sahebabad, dokkhin), 55);
+  const summary = computeOrderSummary([{ item: kacchi, quantity: 1 }], sahebabad, 'instant', dokkhin);
+  assert.equal(summary.deliveryFee, 55);
+  assert.equal(summary.grandTotal, kacchi.price + 55);
+
+  const msg = formatWhatsAppOrderMessage(
+    {
+      orderId: '#ORD-9001',
+      customerName: 'আরিফুল ইসলাম',
+      phone: '01711000000',
+      address: 'দক্ষিণ পাড়া মসজিদ মোড়',
+      zone: sahebabad,
+      subArea: dokkhin,
+      orderType: 'instant',
+      deliveryDate: '',
+      timeSlot: '',
+      items: [{ item: kacchi, quantity: 1 }],
+    },
+    summary,
+    restaurantInfo.brandName
+  );
+  assert.match(msg, /এলাকা: সাহেবাবাদ — দক্ষিণ পাড়া/);
+  assert.match(msg, /৳ ৫৫/);
+});
+
 
 

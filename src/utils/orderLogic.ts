@@ -2,6 +2,7 @@ import {
   CONFIG_DEFAULTS,
   DEFAULT_SITE_CONTENT,
   type AppConfig,
+  type DeliverySubArea,
   type DeliveryZone,
   type MenuCategory,
   type MenuItem,
@@ -40,6 +41,7 @@ export interface OrderFormInput {
   phone: string;
   address: string;
   zone: DeliveryZone;
+  subArea?: DeliverySubArea | null;
   orderType: OrderType;
   deliveryDate: string;
   timeSlot: string;
@@ -256,12 +258,53 @@ export function filterMenuItems(
 }
 
 /**
+ * Resolves effective delivery fee considering optional sub-area override.
+ */
+export function getEffectiveDeliveryFee(
+  zone: DeliveryZone,
+  subArea?: DeliverySubArea | null
+): number {
+  if (zone.isOutOfArea) return 0;
+  if (subArea && typeof subArea.fee === 'number' && Number.isFinite(subArea.fee)) {
+    return Math.max(0, subArea.fee);
+  }
+  return Math.max(0, zone.fee);
+}
+
+/**
+ * Resolves effective delivery ETA considering optional sub-area override.
+ */
+export function getEffectiveDeliveryEta(
+  zone: DeliveryZone,
+  subArea?: DeliverySubArea | null
+): string {
+  if (subArea?.eta && subArea.eta.trim()) {
+    return subArea.eta.trim();
+  }
+  return zone.eta;
+}
+
+/**
+ * Formats full delivery area display label including optional sub-area.
+ */
+export function formatZoneDisplayName(
+  zone: DeliveryZone,
+  subArea?: DeliverySubArea | null
+): string {
+  if (subArea?.name && subArea.name.trim()) {
+    return `${zone.name} — ${subArea.name.trim()}`;
+  }
+  return zone.name;
+}
+
+/**
  * Calculates cart totals, delivery fee, and whether Pre-Order mode is forced.
  */
 export function computeOrderSummary(
   cartItems: CartItem[],
   selectedZone: DeliveryZone,
-  requestedOrderType: OrderType
+  requestedOrderType: OrderType,
+  selectedSubArea?: DeliverySubArea | null
 ): OrderSummary {
   const itemCount = cartItems.reduce((sum, entry) => sum + entry.quantity, 0);
   const subtotal = cartItems.reduce(
@@ -276,7 +319,9 @@ export function computeOrderSummary(
     : requestedOrderType;
 
   const deliveryFee =
-    itemCount === 0 || isPickupOnlyZone ? 0 : selectedZone.fee;
+    itemCount === 0 || isPickupOnlyZone
+      ? 0
+      : getEffectiveDeliveryFee(selectedZone, selectedSubArea);
 
   const grandTotal = itemCount === 0 ? 0 : subtotal + deliveryFee;
 
@@ -408,12 +453,14 @@ export function formatWhatsAppOrderMessage(
     lines.push(`*সময়:* ${input.timeSlot}`);
   }
 
+  const zoneDisplay = formatZoneDisplayName(input.zone, input.subArea);
+
   lines.push(
     ``,
     `*ক্রেতার তথ্য:*`,
     `নাম: ${input.customerName.trim()}`,
     `মোবাইল: ${input.phone.trim()}`,
-    `এলাকা: ${input.zone.name}`,
+    `এলাকা: ${zoneDisplay}`,
     `ঠিকানা: ${
       input.address.trim() ||
       (summary.isPickupOnlyZone ? 'দোকান থেকে পিকআপ করবেন' : '')
@@ -433,7 +480,7 @@ export function formatWhatsAppOrderMessage(
   lines.push(
     `--------------------------------`,
     `খাবারের দাম: ${formatBDT(summary.subtotal)}`,
-    `ডেলিভারি চার্জ (${input.zone.name}): ${
+    `ডেলিভারি চার্জ (${zoneDisplay}): ${
       summary.deliveryFee === 0 ? '৳ ০ (পিকআপ)' : formatBDT(summary.deliveryFee)
     }`,
     `*সর্বমোট বিল: ${formatBDT(summary.grandTotal)}*`,
@@ -502,7 +549,16 @@ export function loadAppConfig(): AppConfig {
       siteContent: mergeSiteContent(parsed.siteContent),
       deliveryZones:
         Array.isArray(parsed.deliveryZones) && parsed.deliveryZones.length > 0
-          ? parsed.deliveryZones
+          ? parsed.deliveryZones.map((zone) => {
+              if (Array.isArray(zone.subAreas)) return zone;
+              const defaultMatch = CONFIG_DEFAULTS.deliveryZones.find(
+                (dz) => dz.id === zone.id
+              );
+              return {
+                ...zone,
+                subAreas: defaultMatch?.subAreas ?? [],
+              };
+            })
           : CONFIG_DEFAULTS.deliveryZones,
       menuItems:
         Array.isArray(parsed.menuItems) && parsed.menuItems.length > 0

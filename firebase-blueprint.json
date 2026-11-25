@@ -102,6 +102,7 @@
         "eta": { "type": "string", "maxLength": 80 },
         "isOutOfArea": { "type": "boolean" },
         "note": { "type": "string", "maxLength": 300 },
+        "subAreas": { "type": "array", "description": "Optional list of sub-areas (max 25) under this delivery zone with optional fee/eta overrides." },
         "sortOrder": { "type": "number" }
       },
       "required": ["id", "name", "fee", "eta", "isOutOfArea", "sortOrder"]

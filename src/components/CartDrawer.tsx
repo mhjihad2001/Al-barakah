@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  type DeliverySubArea,
   type DeliveryZone,
   PREORDER_TIME_SLOTS,
   type RestaurantInfo,
@@ -23,7 +24,10 @@ import {
   computeOrderSummary,
   formatBDT,
   formatWhatsAppOrderMessage,
+  formatZoneDisplayName,
   generateOrderId,
+  getEffectiveDeliveryEta,
+  getEffectiveDeliveryFee,
   type OrderType,
   type SavedOrderRecord,
   toBengaliDigits,
@@ -40,7 +44,9 @@ interface CartDrawerProps {
   onUpdateQuantity: (itemId: string, delta: number) => void;
   onRemoveItem: (itemId: string) => void;
   selectedZone: DeliveryZone;
+  selectedSubArea?: DeliverySubArea | null;
   onSelectZone: (zoneId: string) => void;
+  onSelectSubArea?: (subAreaId: string) => void;
   orderType: OrderType;
   onChangeOrderType: (type: OrderType) => void;
   onOrderConfirmed: (
@@ -61,7 +67,9 @@ export function CartDrawer({
   onUpdateQuantity,
   onRemoveItem,
   selectedZone,
+  selectedSubArea = null,
   onSelectZone,
+  onSelectSubArea,
   orderType,
   onChangeOrderType,
   onOrderConfirmed,
@@ -86,7 +94,9 @@ export function CartDrawer({
 
   const waHiddenLinkRef = useRef<HTMLAnchorElement>(null);
 
-  const summary = computeOrderSummary(cartItems, selectedZone, orderType);
+  const subAreas = !selectedZone.isOutOfArea ? (selectedZone.subAreas ?? []) : [];
+  const zoneDisplayName = formatZoneDisplayName(selectedZone, selectedSubArea);
+  const summary = computeOrderSummary(cartItems, selectedZone, orderType, selectedSubArea);
 
   useEffect(() => {
     const onScroll = () => setShowFloating(window.scrollY > 240);
@@ -115,6 +125,7 @@ export function CartDrawer({
       phone,
       address,
       zone: selectedZone,
+      subArea: selectedSubArea,
       orderType: summary.effectiveOrderType,
       deliveryDate,
       timeSlot,
@@ -149,7 +160,7 @@ export function CartDrawer({
       createdAt: new Date().toISOString(),
       customerName: customerName.trim(),
       phone: phone.trim(),
-      zoneName: selectedZone.name,
+      zoneName: zoneDisplayName,
       address:
         address.trim() ||
         (summary.isPickupOnlyZone ? 'দোকান থেকে সরাসরি পিকআপ' : ''),
@@ -170,7 +181,7 @@ export function CartDrawer({
     };
 
     try {
-      await onOrderConfirmed(record, selectedZone.name, metaEventId);
+      await onOrderConfirmed(record, zoneDisplayName, metaEventId);
       setReceiptState({ orderId, url, message });
 
       if (restaurantInfo.whatsappRedirectEnabled && waHiddenLinkRef.current) {
@@ -609,6 +620,31 @@ export function CartDrawer({
                       </select>
                     </div>
 
+                    {subAreas.length > 0 && onSelectSubArea && (
+                      <div>
+                        <label
+                          htmlFor="checkout-subarea"
+                          className="block text-xs font-medium text-[#111815]"
+                        >
+                          উপ-এলাকা / মহল্লা
+                        </label>
+                        <select
+                          id="checkout-subarea"
+                          data-testid="checkout-subarea-select"
+                          value={selectedSubArea?.id ?? subAreas[0].id}
+                          onChange={(e) => onSelectSubArea(e.target.value)}
+                          className="mt-1 block w-full min-h-[44px] rounded-md border border-[#111815]/20 bg-white px-3 py-2 text-sm text-[#111815] focus:border-[#C5A059] focus:outline-none"
+                        >
+                          {subAreas.map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} — {formatBDT(getEffectiveDeliveryFee(selectedZone, sub))} (
+                              {getEffectiveDeliveryEta(selectedZone, sub)})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div>
                       <label
                         htmlFor="checkout-address"
@@ -656,7 +692,7 @@ export function CartDrawer({
                     <span>
                       {summary.isPickupOnlyZone
                         ? 'ডেলিভারি চার্জ (পিকআপ)'
-                        : `ডেলিভারি চার্জ (${selectedZone.name})`}
+                        : `ডেলিভারি চার্জ (${zoneDisplayName})`}
                     </span>
                     <span
                       data-testid="cart-delivery-fee"

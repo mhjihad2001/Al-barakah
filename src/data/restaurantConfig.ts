@@ -35,6 +35,13 @@ export interface RestaurantInfo {
   instagramUrl: string;
 }
 
+export interface DeliverySubArea {
+  id: string;
+  name: string;
+  fee?: number;
+  eta?: string;
+}
+
 export interface DeliveryZone {
   id: string;
   name: string;
@@ -42,6 +49,7 @@ export interface DeliveryZone {
   eta: string;
   isOutOfArea?: boolean;
   note?: string;
+  subAreas?: DeliverySubArea[];
   sortOrder?: number;
 }
 
@@ -363,6 +371,11 @@ export const CONFIG_DEFAULTS: AppConfig = {
       fee: 40,
       eta: '৩০–৪০ মিনিট',
       note: 'মূল রান্নাঘর থেকে গরম হট-বক্সে সরাসরি ডেলিভারি।',
+      subAreas: [
+        { id: 'sadar-college-road', name: 'কলেজ রোড' },
+        { id: 'sadar-upazila', name: 'উপজেলা চত্বর ও থানা রোড' },
+        { id: 'sadar-bus-stand', name: 'বাসস্ট্যান্ড ও হাসপাতাল মোড়' },
+      ],
       sortOrder: 1,
     },
     {
@@ -371,6 +384,11 @@ export const CONFIG_DEFAULTS: AppConfig = {
       fee: 50,
       eta: '৩৫–৪৫ মিনিট',
       note: 'গরম ও সতেজ রাখতে বিশেষ ইনসুলেটেড প্যাকেজিং।',
+      subAreas: [
+        { id: 'sahebabad-bazar', name: 'সাহেবাবাদ বাজার' },
+        { id: 'sahebabad-notun-para', name: 'নতুন পাড়া' },
+        { id: 'sahebabad-dokkhin-para', name: 'দক্ষিণ পাড়া', fee: 55 },
+      ],
       sortOrder: 2,
     },
     {
@@ -379,6 +397,10 @@ export const CONFIG_DEFAULTS: AppConfig = {
       fee: 60,
       eta: '৪০–৫৫ মিনিট',
       note: 'নিজস্ব রাইডার সার্ভিসের মাধ্যমে ডেলিভারি।',
+      subAreas: [
+        { id: 'madhobpur-bazar', name: 'মাধবপুর বাজার' },
+        { id: 'madhobpur-masjid-road', name: 'বড় মসজিদ রোড' },
+      ],
       sortOrder: 3,
     },
     {
@@ -387,6 +409,10 @@ export const CONFIG_DEFAULTS: AppConfig = {
       fee: 70,
       eta: '৪৫–৬০ মিনিট',
       note: 'খাওয়ার অন্তত ৪৫ মিনিট আগে অর্ডার করলে ভালো হয়।',
+      subAreas: [
+        { id: 'shashidal-station', name: 'শশীদল স্টেশন বাজার' },
+        { id: 'shashidal-railgate', name: 'রেলগেট সংলগ্ন এলাকা' },
+      ],
       sortOrder: 4,
     },
     {
@@ -395,6 +421,10 @@ export const CONFIG_DEFAULTS: AppConfig = {
       fee: 80,
       eta: '৫০–৬৫ মিনিট',
       note: 'বর্ধিত ডেলিভারি এলাকা।',
+      subAreas: [
+        { id: 'mirpur-bazar', name: 'মিরপুর বাজার' },
+        { id: 'mirpur-school-road', name: 'হাইস্কুল রোড' },
+      ],
       sortOrder: 5,
     },
     {
@@ -404,6 +434,7 @@ export const CONFIG_DEFAULTS: AppConfig = {
       eta: 'পিকআপ / প্রি-অর্ডার',
       isOutOfArea: true,
       note: 'এই এলাকায় তাৎক্ষণিক হোম ডেলিভারি নেই, তবে দোকান থেকে সরাসরি পিকআপ অথবা অনুষ্ঠানের জন্য প্রি-অর্ডার করতে পারবেন।',
+      subAreas: [],
       sortOrder: 6,
     },
   ],

@@ -131,7 +131,7 @@ service cloud.firestore {
         'id', 'name', 'fee', 'eta', 'isOutOfArea', 'sortOrder'
       ]) &&
       data.keys().hasOnly([
-        'id', 'name', 'fee', 'eta', 'isOutOfArea', 'note', 'sortOrder'
+        'id', 'name', 'fee', 'eta', 'isOutOfArea', 'note', 'subAreas', 'sortOrder'
       ]) &&
       data.id is string && data.id == zoneId && isValidId(data.id) &&
       data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
@@ -139,6 +139,7 @@ service cloud.firestore {
       data.eta is string && data.eta.size() >= 1 && data.eta.size() <= 80 &&
       data.isOutOfArea is bool &&
       (!('note' in data) || (data.note is string && data.note.size() <= 300)) &&
+      (!('subAreas' in data) || (data.subAreas is list && data.subAreas.size() <= 25 && (data.subAreas.size() == 0 || data.subAreas[0] is map))) &&
       data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 10000;
     }
 
