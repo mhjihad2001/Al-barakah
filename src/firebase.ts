@@ -8,6 +8,7 @@ import {
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 export const SHARED_FIRESTORE_DATABASE_ID =
@@ -30,6 +31,7 @@ export const db = getFirestore(app, SHARED_FIRESTORE_DATABASE_ID);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const functions = getFunctions(app, 'asia-southeast1');
+export const storage = getStorage(app);
 
 export let analytics: Analytics | null = null;
 

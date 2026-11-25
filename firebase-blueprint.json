@@ -83,7 +83,11 @@
         "description": { "type": "string", "maxLength": 600 },
         "servingSize": { "type": "string", "maxLength": 80 },
         "price": { "type": "number" },
-        "image": { "type": "string", "maxLength": 500 },
+        "image": {
+          "type": "string",
+          "maxLength": 180000,
+          "description": "Menu dish image URL (preferred: Firebase Storage or external HTTPS URL) or strictly bounded compressed JPEG data URL fallback."
+        },
         "available": { "type": "boolean" },
         "preOrderOnly": { "type": "boolean" },
         "advanceNotice": { "type": "string", "maxLength": 160 },

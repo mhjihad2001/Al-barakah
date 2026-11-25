@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import {
   Activity,
   ArrowLeft,
+  Camera,
   Check,
   Copy,
   Download,
   KeyRound,
+  Loader2,
   Pencil,
   Plus,
   RotateCcw,
@@ -13,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  UtensilsCrossed,
   X,
 } from 'lucide-react';
 import {
@@ -25,6 +28,7 @@ import {
   type MenuItem,
   type StoreStatusMode,
 } from '../data/restaurantConfig';
+import { uploadMenuImage } from '../utils/imageUpload';
 import { type MetaEventLogEntry, MetaTracker } from '../utils/metaTracker';
 import {
   formatBDT,
@@ -35,6 +39,7 @@ import {
   toBengaliDigits,
 } from '../utils/orderLogic';
 import { AdminPageCopyEditor } from './AdminPageCopyEditor';
+import { MenuImagePicker } from './MenuImagePicker';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -105,6 +110,7 @@ export function AdminModal({
   const [newDishPreOrder, setNewDishPreOrder] = useState(false);
   const [newDishNotice, setNewDishNotice] = useState('কমপক্ষে ৪ ঘণ্টা আগে অর্ডার করতে হবে');
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
+  const [quickUploadingMenuId, setQuickUploadingMenuId] = useState<string | null>(null);
 
   // New Delivery Zone State
   const [newZoneName, setNewZoneName] = useState('');
@@ -978,18 +984,19 @@ export function AdminModal({
                       />
                       <input
                         type="text"
-                        value={newDishImage}
-                        onChange={(e) => setNewDishImage(e.target.value)}
-                        placeholder="ছবির পাথ বা URL"
+                        value={newDishDesc}
+                        onChange={(e) => setNewDishDesc(e.target.value)}
+                        placeholder="খাবারের সংক্ষিপ্ত বিবরণ"
                         className="min-h-[40px] rounded border border-[#111815]/20 bg-white px-3 text-sm sm:col-span-2"
                       />
                     </div>
-                    <input
-                      type="text"
-                      value={newDishDesc}
-                      onChange={(e) => setNewDishDesc(e.target.value)}
-                      placeholder="খাবারের সংক্ষিপ্ত বিবরণ"
-                      className="w-full min-h-[40px] rounded border border-[#111815]/20 bg-white px-3 text-sm"
+                    <MenuImagePicker
+                      value={newDishImage}
+                      onChange={setNewDishImage}
+                      itemHint={newDishName || 'new-dish'}
+                      label="নতুন খাবারের ছবি যুক্ত করুন"
+                      onStatusMessage={(msg) => flashBanner(msg)}
+                      testIdPrefix="new-dish-image"
                     />
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                       <div className="flex flex-wrap items-center gap-3">
@@ -1024,19 +1031,86 @@ export function AdminModal({
                   <div className="space-y-3">
                     {config.menuItems.map((item) => {
                       const isEditing = editingMenuId === item.id;
+                      const isQuickUploading = quickUploadingMenuId === item.id;
                       return (
                         <div
                           key={item.id}
                           className="rounded-lg border border-[#111815]/12 bg-[#FFFDF9] p-4 space-y-3"
                         >
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0 flex-1">
-                              <p className="font-serif text-base font-semibold text-[#111815]">
-                                {item.name}
-                              </p>
-                              <p className="text-xs text-[#525B56]">
-                                {item.category} · {item.servingSize}
-                              </p>
+                            <div className="flex min-w-0 flex-1 items-center gap-3">
+                              {/* Quick-upload Dish Thumbnail */}
+                              <label
+                                title="১-ক্লিকে এই খাবারের ছবি বদলান"
+                                className="group relative h-14 w-16 shrink-0 overflow-hidden rounded-md border border-[#111815]/15 bg-[#18221D] cursor-pointer"
+                              >
+                                {item.image ? (
+                                  <img
+                                    src={item.image}
+                                    alt={item.name}
+                                    referrerPolicy="no-referrer"
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-[#C5A059]">
+                                    <UtensilsCrossed className="h-4 w-4" aria-hidden="true" />
+                                  </div>
+                                )}
+                                <span className="absolute inset-0 flex items-center justify-center bg-[#111815]/60 text-[#C5A059] opacity-0 transition-opacity group-hover:opacity-100">
+                                  {isQuickUploading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                  ) : (
+                                    <Camera className="h-4 w-4" aria-hidden="true" />
+                                  )}
+                                </span>
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute bottom-0.5 right-0.5 flex h-5 w-5 items-center justify-center rounded bg-[#111815]/85 text-[#C5A059] shadow-sm"
+                                >
+                                  {isQuickUploading ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Camera className="h-3 w-3" />
+                                  )}
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  aria-label={`${item.name} এর ছবি আপলোড করুন`}
+                                  data-testid={`quick-image-upload-${item.id}`}
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    e.target.value = '';
+                                    if (!file) return;
+                                    setQuickUploadingMenuId(item.id);
+                                    try {
+                                      const res = await uploadMenuImage(file, item.id);
+                                      handleUpdateMenuItem(item.id, { image: res.url });
+                                      flashBanner(
+                                        `"${item.name}" এর নতুন ছবি যুক্ত হয়েছে (${toBengaliDigits(res.sizeKB)} KB)।`
+                                      );
+                                    } catch (err) {
+                                      flashBanner(
+                                        err instanceof Error
+                                          ? err.message
+                                          : 'ছবিটি আপলোড করা যায়নি।'
+                                      );
+                                    } finally {
+                                      setQuickUploadingMenuId(null);
+                                    }
+                                  }}
+                                  className="sr-only"
+                                />
+                              </label>
+
+                              <div className="min-w-0 flex-1">
+                                <p className="font-serif text-base font-semibold text-[#111815]">
+                                  {item.name}
+                                </p>
+                                <p className="text-xs text-[#525B56]">
+                                  {item.category} · {item.servingSize}
+                                </p>
+                              </div>
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
@@ -1151,36 +1225,32 @@ export function AdminModal({
                                   </select>
                                 </div>
                               </div>
-                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                <div>
-                                  <label className="block text-[11px] font-semibold text-[#525B56]">
-                                    পরিবেশনের পরিমাণ
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={item.servingSize}
-                                    onChange={(e) =>
-                                      handleUpdateMenuItem(item.id, {
-                                        servingSize: e.target.value,
-                                      })
-                                    }
-                                    className="mt-1 block w-full min-h-[38px] rounded border border-[#111815]/20 bg-white px-2.5 text-sm"
-                                  />
-                                </div>
-                                <div className="sm:col-span-2">
-                                  <label className="block text-[11px] font-semibold text-[#525B56]">
-                                    ছবির পাথ বা URL
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={item.image}
-                                    onChange={(e) =>
-                                      handleUpdateMenuItem(item.id, { image: e.target.value })
-                                    }
-                                    className="mt-1 block w-full min-h-[38px] rounded border border-[#111815]/20 bg-white px-2.5 text-sm"
-                                  />
-                                </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-[#525B56]">
+                                  পরিবেশনের পরিমাণ
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.servingSize}
+                                  onChange={(e) =>
+                                    handleUpdateMenuItem(item.id, {
+                                      servingSize: e.target.value,
+                                    })
+                                  }
+                                  className="mt-1 block w-full min-h-[38px] rounded border border-[#111815]/20 bg-white px-2.5 text-sm"
+                                />
                               </div>
+                              <MenuImagePicker
+                                value={item.image}
+                                onChange={(nextImg) =>
+                                  handleUpdateMenuItem(item.id, { image: nextImg })
+                                }
+                                itemHint={item.id}
+                                label="খাবারের ছবি পরিবর্তন করুন"
+                                compact
+                                onStatusMessage={(msg) => flashBanner(`"${item.name}" — ${msg}`)}
+                                testIdPrefix={`edit-dish-image-${item.id}`}
+                              />
                               <div>
                                 <label className="block text-[11px] font-semibold text-[#525B56]">
                                   খাবারের বিবরণ

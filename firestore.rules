@@ -119,7 +119,7 @@ service cloud.firestore {
       (!('description' in data) || (data.description is string && data.description.size() <= 600)) &&
       (!('servingSize' in data) || (data.servingSize is string && data.servingSize.size() <= 80)) &&
       data.price is number && data.price >= 0 && data.price <= 500000 &&
-      (!('image' in data) || (data.image is string && data.image.size() <= 500)) &&
+      (!('image' in data) || (data.image is string && data.image.size() <= 180000)) &&
       data.available is bool &&
       data.preOrderOnly is bool &&
       (!('advanceNotice' in data) || (data.advanceNotice is string && data.advanceNotice.size() <= 160)) &&

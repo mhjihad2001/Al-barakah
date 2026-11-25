@@ -47,6 +47,7 @@ import {
   type OrderStatus,
   type SavedOrderRecord,
 } from './orderLogic';
+import { MAX_MENU_IMAGE_LENGTH } from './imageUpload';
 
 export interface OrderTrackingRecord {
   docId: string;
@@ -690,7 +691,7 @@ export async function upsertMenuItemToFirestore(
     description: clampStr(item.description, 600),
     servingSize: clampStr(item.servingSize, 80),
     price: Math.max(0, Math.min(500000, Number(item.price || 0))),
-    image: clampStr(item.image, 500),
+    image: clampStr(item.image, MAX_MENU_IMAGE_LENGTH),
     available: Boolean(item.available),
     preOrderOnly: Boolean(item.preOrderOnly),
     sortOrder: Math.max(0, Math.min(10000, Number(sortOrder))),
@@ -807,7 +808,7 @@ export async function seedInitialData(
         description: clampStr(item.description, 600),
         servingSize: clampStr(item.servingSize, 80),
         price: Math.max(0, Number(item.price || 0)),
-        image: clampStr(item.image, 500),
+        image: clampStr(item.image, MAX_MENU_IMAGE_LENGTH),
         available: Boolean(item.available),
         preOrderOnly: Boolean(item.preOrderOnly),
         sortOrder: item.sortOrder ?? index + 1,

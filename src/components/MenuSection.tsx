@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarClock, Minus, Plus, UtensilsCrossed, X } from 'lucide-react';
 import {
   DEFAULT_SITE_CONTENT,
@@ -27,7 +27,11 @@ interface MenuSectionProps {
 function MenuCardImage({ item }: { item: MenuItem }) {
   const [failed, setFailed] = useState(false);
 
-  if (failed) {
+  useEffect(() => {
+    setFailed(false);
+  }, [item.image]);
+
+  if (failed || !item.image) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-[#18221D] to-[#111815] p-6 text-center text-[#C5A059]">
         <UtensilsCrossed className="h-8 w-8 opacity-80" aria-hidden="true" />
