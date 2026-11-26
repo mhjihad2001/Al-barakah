@@ -28,7 +28,6 @@ export interface RestaurantInfo {
   closeHour: number;
   closeMinute: number;
   statusMode: StoreStatusMode;
-  adminPin: string;
   mapsCoordinates: string;
   mapsUrl: string;
   facebookUrl: string;
@@ -357,7 +356,6 @@ export const CONFIG_DEFAULTS: AppConfig = {
     closeHour: 22,
     closeMinute: 30,
     statusMode: 'auto',
-    adminPin: '1234',
     mapsCoordinates: '২৩.৬২১৪° উঃ, ৯১.১১৪২° পূঃ',
     mapsUrl: 'https://maps.google.com/?q=23.6214,91.1142',
     facebookUrl: 'https://facebook.com',

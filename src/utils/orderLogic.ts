@@ -94,6 +94,24 @@ export interface SavedOrderRecord {
 }
 
 const BENGALI_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+
+/**
+ * Validates user/config-supplied external URLs so only safe http(s) links
+ * can be rendered in anchor href attributes (blocks javascript:, data:, vbscript:).
+ */
+export function sanitizeExternalUrl(rawUrl: string | undefined | null): string | null {
+  const trimmed = (rawUrl ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 const STORAGE_CONFIG_KEY = 'albarakah_config_v1';
 const STORAGE_ORDERS_KEY = 'albarakah_orders_v1';
 

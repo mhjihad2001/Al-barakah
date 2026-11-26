@@ -1,4 +1,4 @@
-import { signInWithPopup, signOut } from 'firebase/auth';
+import { signInWithPopup, signOut, type User } from 'firebase/auth';
 import {
   arrayUnion,
   collection,
@@ -121,6 +121,8 @@ function timestampToIso(ts: unknown): string {
   return new Date().toISOString();
 }
 
+export const PRIMARY_ADMIN_EMAIL = 'mhjihad2001@gmail.com';
+
 export async function signInAdminWithGoogle() {
   const credential = await signInWithPopup(auth, googleProvider);
   return credential.user;
@@ -128,6 +130,24 @@ export async function signInAdminWithGoogle() {
 
 export async function signOutAdmin() {
   await signOut(auth);
+}
+
+/**
+ * Verifies whether a signed-in Firebase user is an authorized restaurant admin:
+ * requires verified email AND either matches the primary admin email or exists in /admins/{uid}.
+ * Mirrors the server-side isAdmin() rule in firestore.rules.
+ */
+export async function verifyAdminAccess(user: User | null): Promise<boolean> {
+  if (!user || !user.emailVerified) return false;
+  if (user.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL) {
+    return true;
+  }
+  try {
+    const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+    return adminDoc.exists();
+  } catch {
+    return false;
+  }
 }
 
 export function createCloudCapiDispatcher(): MetaCapiDispatcher {
@@ -178,7 +198,6 @@ export function subscribeToStorefrontConfig(handlers: {
             d.statusMode === 'open' || d.statusMode === 'preorder' || d.statusMode === 'auto'
               ? d.statusMode
               : CONFIG_DEFAULTS.restaurantInfo.statusMode,
-          adminPin: typeof d.adminPin === 'string' && d.adminPin ? d.adminPin : CONFIG_DEFAULTS.restaurantInfo.adminPin,
           mapsCoordinates: typeof d.mapsCoordinates === 'string' ? d.mapsCoordinates : CONFIG_DEFAULTS.restaurantInfo.mapsCoordinates,
           mapsUrl: typeof d.mapsUrl === 'string' ? d.mapsUrl : CONFIG_DEFAULTS.restaurantInfo.mapsUrl,
           facebookUrl: typeof d.facebookUrl === 'string' ? d.facebookUrl : CONFIG_DEFAULTS.restaurantInfo.facebookUrl,
@@ -546,7 +565,6 @@ export async function saveGeneralSettingsToFirestore(
     closeMinute: Math.min(59, Math.max(0, Number(restaurantInfo.closeMinute ?? 30))),
     statusMode: restaurantInfo.statusMode,
     isOpen: restaurantInfo.statusMode !== 'preorder',
-    adminPin: clampStr(restaurantInfo.adminPin, 20) || '1234',
     mapsCoordinates: clampStr(restaurantInfo.mapsCoordinates, 80),
     mapsUrl: clampStr(restaurantInfo.mapsUrl, 500),
     facebookUrl: clampStr(restaurantInfo.facebookUrl, 500),
@@ -782,7 +800,6 @@ export async function seedInitialData(
       closeMinute: sourceConfig.restaurantInfo.closeMinute,
       statusMode: sourceConfig.restaurantInfo.statusMode,
       isOpen: sourceConfig.restaurantInfo.statusMode !== 'preorder',
-      adminPin: clampStr(sourceConfig.restaurantInfo.adminPin, 20),
       mapsCoordinates: clampStr(sourceConfig.restaurantInfo.mapsCoordinates, 80),
       mapsUrl: clampStr(sourceConfig.restaurantInfo.mapsUrl, 500),
       facebookUrl: clampStr(sourceConfig.restaurantInfo.facebookUrl, 500),

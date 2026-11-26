@@ -7,6 +7,7 @@ import {
   filterMenuItems,
   formatBDT,
   getRestaurantLiveStatus,
+  sanitizeExternalUrl,
   toBengaliDigits,
   validateCateringForm,
   validateOrderForm,
@@ -237,6 +238,17 @@ test('sub-area overrides delivery fee, ETA, order summary, and WhatsApp receipt 
   );
   assert.match(msg, /এলাকা: সাহেবাবাদ — দক্ষিণ পাড়া/);
   assert.match(msg, /৳ ৫৫/);
+});
+
+test('sanitizeExternalUrl allows http/https links and rejects javascript/data schemes', () => {
+  assert.equal(
+    sanitizeExternalUrl('https://maps.google.com/?q=23.6214,91.1142'),
+    'https://maps.google.com/?q=23.6214,91.1142'
+  );
+  assert.equal(sanitizeExternalUrl('http://example.com/page'), 'http://example.com/page');
+  assert.equal(sanitizeExternalUrl('javascript:alert(1)'), null);
+  assert.equal(sanitizeExternalUrl('data:text/html,<script>alert(1)</script>'), null);
+  assert.equal(sanitizeExternalUrl('   '), null);
 });
 
 

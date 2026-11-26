@@ -4,7 +4,7 @@ import {
   type RestaurantInfo,
   type SiteContent,
 } from '../data/restaurantConfig';
-import { toBengaliDigits } from '../utils/orderLogic';
+import { sanitizeExternalUrl, toBengaliDigits } from '../utils/orderLogic';
 
 interface ReviewsAndFooterProps {
   restaurantInfo: RestaurantInfo;
@@ -19,6 +19,10 @@ export function ReviewsAndFooter({
   footerContent = DEFAULT_SITE_CONTENT.footer,
   onOpenTracking,
 }: ReviewsAndFooterProps) {
+  const safeFacebookUrl = sanitizeExternalUrl(restaurantInfo.facebookUrl);
+  const safeInstagramUrl = sanitizeExternalUrl(restaurantInfo.instagramUrl);
+  const safeMapsUrl =
+    sanitizeExternalUrl(restaurantInfo.mapsUrl) ?? 'https://maps.google.com/?q=23.6214,91.1142';
   return (
     <>
       {/* Customer Reviews Section */}
@@ -189,9 +193,9 @@ export function ReviewsAndFooter({
                 >
                   হোয়াটসঅ্যাপ
                 </a>
-                {restaurantInfo.facebookUrl && (
+                {safeFacebookUrl && (
                   <a
-                    href={restaurantInfo.facebookUrl}
+                    href={safeFacebookUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-[#C5A059] underline underline-offset-4"
@@ -199,9 +203,9 @@ export function ReviewsAndFooter({
                     ফেসবুক
                   </a>
                 )}
-                {restaurantInfo.instagramUrl && (
+                {safeInstagramUrl && (
                   <a
-                    href={restaurantInfo.instagramUrl}
+                    href={safeInstagramUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-[#C5A059] underline underline-offset-4"
@@ -254,7 +258,7 @@ export function ReviewsAndFooter({
                       {footerContent.mapFooterLabel}
                     </span>
                     <a
-                      href={restaurantInfo.mapsUrl || 'https://maps.google.com/?q=23.6214,91.1142'}
+                      href={safeMapsUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#C5A059] hover:text-[#D4B26E]"

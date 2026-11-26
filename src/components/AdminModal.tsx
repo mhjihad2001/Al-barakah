@@ -6,12 +6,14 @@ import {
   Check,
   Copy,
   Download,
-  KeyRound,
+  Lock,
   Loader2,
+  LogOut,
   Pencil,
   Plus,
   RotateCcw,
   Send,
+  ShieldAlert,
   ShieldCheck,
   Trash2,
   Upload,
@@ -51,6 +53,7 @@ interface AdminModalProps {
   orders: SavedOrderRecord[];
   firestoreOrders: SavedOrderRecord[];
   adminUserEmail: string | null;
+  adminAuthStatus: 'checking' | 'unauthenticated' | 'unauthorized' | 'authorized';
   onSignInAdmin: () => Promise<void>;
   onSignOutAdmin: () => Promise<void>;
   onSeedFirestore: () => Promise<{ ok: boolean; message: string }>;
@@ -85,15 +88,14 @@ export function AdminModal({
   orders,
   firestoreOrders,
   adminUserEmail,
+  adminAuthStatus,
   onSignInAdmin,
   onSignOutAdmin,
   onSeedFirestore,
   onUpdateOrderStatus,
   onSaveSecretsToFirestore,
 }: AdminModalProps) {
-  const [unlocked, setUnlocked] = useState(asPage);
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState('');
+  const [authError, setAuthError] = useState('');
   const [activeTab, setActiveTab] = useState<AdminTab>('general');
   const [saveBanner, setSaveBanner] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
@@ -154,14 +156,25 @@ export function AdminModal({
     setTimeout(() => setSaveBanner(''), 2500);
   };
 
-  const handleUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pinInput.trim() === config.restaurantInfo.adminPin) {
-      setUnlocked(true);
-      setPinError('');
-      setPinInput('');
-    } else {
-      setPinError('ভুল পিন! ডিফল্ট পিন হলো 1234');
+  const handleGoogleAdminLogin = async () => {
+    setAuthError('');
+    setAuthBusy(true);
+    try {
+      await onSignInAdmin();
+    } catch (err) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      if (code === 'auth/popup-closed-by-user') {
+        setAuthError('Google সাইন-ইন উইন্ডো বন্ধ হয়ে গেছে। আবার চেষ্টা করুন।');
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError('ব্রাউজার পপ-আপ ব্লক করেছে। পপ-আপ অনুমতি দিয়ে আবার চেষ্টা করুন।');
+      } else {
+        setAuthError('Google সাইন-ইন সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।');
+      }
+    } finally {
+      setAuthBusy(false);
     }
   };
 
@@ -469,108 +482,167 @@ export function AdminModal({
           )}
         </div>
 
-        {!unlocked ? (
-          /* PIN Login Screen */
-          <div className="flex flex-1 items-center justify-center p-8">
-            <form
-              onSubmit={handleUnlock}
-              className="w-full max-w-sm rounded-xl border border-[#111815]/15 bg-[#FFFDF9] p-6 shadow-sm"
-            >
-              <div className="flex items-center gap-2.5 text-[#111815]">
-                <KeyRound className="h-5 w-5 text-[#8A6924]" aria-hidden="true" />
-                <h3 className="font-serif text-xl font-semibold">অ্যাডমিন পিন দিন</h3>
+        {adminAuthStatus === 'checking' ? (
+          /* Verifying Firebase Auth Session */
+          <div
+            data-testid="admin-auth-checking"
+            className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center"
+          >
+            <Loader2 className="h-7 w-7 animate-spin text-[#8A6924]" aria-hidden="true" />
+            <p className="font-serif text-lg font-semibold text-[#111815]">
+              অ্যাডমিন পরিচয় যাচাই করা হচ্ছে...
+            </p>
+            <p className="text-xs text-[#525B56]">
+              অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করুন।
+            </p>
+          </div>
+        ) : adminAuthStatus === 'unauthenticated' ? (
+          /* Mandatory Firebase Google Admin Sign-In Gate */
+          <div
+            data-testid="admin-auth-gate"
+            className="flex flex-1 items-center justify-center p-6 sm:p-10"
+          >
+            <div className="w-full max-w-md rounded-xl border border-[#111815]/15 bg-[#FFFDF9] p-7 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#111815] text-[#C5A059]">
+                  <Lock className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-xl font-semibold text-[#111815]">
+                    সুরক্ষিত অ্যাডমিন লগইন
+                  </h3>
+                  <p className="text-xs text-[#525B56]">
+                    Firebase Authentication সুরক্ষিত প্রবেশদ্বার
+                  </p>
+                </div>
               </div>
-              <p className="mt-2 text-xs leading-relaxed text-[#525B56]">
-                মেনু, ডেলিভারি চার্জ ও মেটা পিক্সেল কনফিগার করতে পিন দিন (ডিফল্ট পিন: 1234)।
+
+              <p className="mt-4 text-xs leading-relaxed text-[#2C3530]">
+                অ্যাডমিন প্যানেলটি শুধুমাত্র অনুমোদিত রেস্তোরাঁ অ্যাডমিনের জন্য সংরক্ষিত। মেনু, অর্ডার ও ডেলিভারি সেটিংস পরিচালনা করতে আপনার অনুমোদিত Google অ্যাডমিন অ্যাকাউন্ট দিয়ে সাইন-ইন করুন।
               </p>
 
-              <label
-                htmlFor="admin-pin-input"
-                className="mt-5 block text-xs font-semibold text-[#111815]"
-              >
-                অ্যাডমিন পিন কোড
-              </label>
-              <input
-                id="admin-pin-input"
-                type="password"
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                placeholder="পিন লিখুন (যেমন: 1234)"
-                autoFocus
-                className="mt-1.5 block w-full min-h-[44px] rounded-md border border-[#111815]/25 bg-white px-3.5 py-2 text-sm text-[#111815] focus:border-[#C5A059] focus:outline-none"
-              />
-              {pinError && <p className="mt-2 text-xs text-red-700">{pinError}</p>}
+              {authError && (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800"
+                >
+                  {authError}
+                </p>
+              )}
 
-              <button
-                type="submit"
-                className="mt-5 inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-[#111815] px-5 py-2.5 text-sm font-semibold text-[#C5A059] hover:bg-[#1E2B25] cursor-pointer"
-              >
-                প্যানেল আনলক করুন
-              </button>
-            </form>
+              <div className="mt-6 space-y-2.5">
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={() => void handleGoogleAdminLogin()}
+                  data-testid="admin-google-signin-btn"
+                  className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-md bg-[#111815] px-5 py-2.5 text-sm font-semibold text-[#C5A059] hover:bg-[#1E2B25] disabled:opacity-60 cursor-pointer"
+                >
+                  {authBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  <span>
+                    {authBusy ? 'সাইন-ইন হচ্ছে...' : 'Google অ্যাডমিন অ্যাকাউন্ট দিয়ে সাইন-ইন করুন'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="inline-flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-md border border-[#111815]/20 bg-white px-4 py-2 text-xs font-semibold text-[#111815] hover:bg-[#EFE8DA] cursor-pointer"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>মূল ওয়েবসাইটে ফিরে যান</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : adminAuthStatus === 'unauthorized' ? (
+          /* Signed-in Non-Admin Access Denied Screen */
+          <div
+            data-testid="admin-auth-denied"
+            className="flex flex-1 items-center justify-center p-6 sm:p-10"
+          >
+            <div className="w-full max-w-md rounded-xl border border-red-200 bg-[#FFFDF9] p-7 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-800">
+                  <ShieldAlert className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-xl font-semibold text-red-900">
+                    অ্যাক্সেস অনুমোদিত নয়
+                  </h3>
+                  <p className="text-xs text-[#525B56]">অননুমোদিত অ্যাকাউন্ট শনাক্ত হয়েছে</p>
+                </div>
+              </div>
+
+              <p className="mt-4 text-xs leading-relaxed text-[#2C3530]">
+                আপনি বর্তমানে{' '}
+                <span className="font-semibold text-[#111815]">{adminUserEmail}</span>{' '}
+                অ্যাকাউন্টে সাইন-ইন আছেন, যা এই রেস্তোরাঁর অনুমোদিত অ্যাডমিন তালিকায় নেই। শুধুমাত্র অনুমোদিত অ্যাডমিন অ্যাকাউন্ট দিয়েই এই প্যানেলে প্রবেশ করা যাবে।
+              </p>
+
+              <div className="mt-6 space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => void onSignOutAdmin()}
+                  data-testid="admin-unauthorized-signout-btn"
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-md bg-[#111815] px-5 py-2.5 text-sm font-semibold text-[#C5A059] hover:bg-[#1E2B25] cursor-pointer"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
+                  <span>সাইন আউট করে অন্য অ্যাকাউন্টে চেষ্টা করুন</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="inline-flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-md border border-[#111815]/20 bg-white px-4 py-2 text-xs font-semibold text-[#111815] hover:bg-[#EFE8DA] cursor-pointer"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>মূল ওয়েবসাইটে ফিরে যান</span>
+                </button>
+              </div>
+            </div>
           </div>
         ) : (
-          /* Unlocked 5-Tab Dashboard */
+          /* Verified Authorized Admin 6-Tab Dashboard */
           <>
             {/* Firebase Cloud Sync Bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#111815]/10 bg-[#FFFDF9] px-4 py-2.5 text-xs sm:px-6">
               <div className="flex items-center gap-2 text-[#111815]">
-                <span className="font-semibold">Firebase (albarakah3526):</span>
-                {adminUserEmail ? (
-                  <span className="font-medium text-emerald-800">
-                    যুক্ত ({adminUserEmail})
-                  </span>
-                ) : (
-                  <span className="text-[#525B56]">লোকাল মোড (লাইভ সিঙ্কের জন্য সাইন-ইন করুন)</span>
-                )}
+                <ShieldCheck className="h-4 w-4 text-emerald-700" aria-hidden="true" />
+                <span className="font-semibold">সুরক্ষিত অ্যাডমিন সেশন:</span>
+                <span className="font-medium text-emerald-800">
+                  {adminUserEmail}
+                </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {adminUserEmail ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={authBusy}
-                      onClick={async () => {
-                        setAuthBusy(true);
-                        try {
-                          const res = await onSeedFirestore();
-                          flashBanner(res.message);
-                        } finally {
-                          setAuthBusy(false);
-                        }
-                      }}
-                      className="rounded border border-[#C5A059] bg-[#C5A059]/15 px-2.5 py-1 text-xs font-semibold text-[#111815] hover:bg-[#C5A059]/30 cursor-pointer disabled:opacity-50"
-                    >
-                      ডিফল্ট ডেটা সিড করুন
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void onSignOutAdmin()}
-                      className="rounded border border-[#111815]/20 px-2.5 py-1 text-xs font-medium text-[#525B56] hover:text-[#111815] cursor-pointer"
-                    >
-                      সাইন আউট
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={authBusy}
-                    onClick={async () => {
-                      setAuthBusy(true);
-                      try {
-                        await onSignInAdmin();
-                        flashBanner('Google অ্যাডমিন অ্যাকাউন্ট সফলভাবে যুক্ত হয়েছে।');
-                      } catch {
-                        flashBanner('সাইন-ইন সম্পন্ন হয়নি।');
-                      } finally {
-                        setAuthBusy(false);
-                      }
-                    }}
-                    className="rounded bg-[#111815] px-3 py-1.5 text-xs font-semibold text-[#C5A059] hover:bg-[#222F28] cursor-pointer disabled:opacity-50"
-                  >
-                    Google অ্যাডমিন সাইন-ইন
-                  </button>
-                )}
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={async () => {
+                    setAuthBusy(true);
+                    try {
+                      const res = await onSeedFirestore();
+                      flashBanner(res.message);
+                    } finally {
+                      setAuthBusy(false);
+                    }
+                  }}
+                  className="rounded border border-[#C5A059] bg-[#C5A059]/15 px-2.5 py-1 text-xs font-semibold text-[#111815] hover:bg-[#C5A059]/30 cursor-pointer disabled:opacity-50"
+                >
+                  ডিফল্ট ডেটা সিড করুন
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void onSignOutAdmin()}
+                  data-testid="admin-signout-btn"
+                  className="inline-flex items-center gap-1 rounded border border-[#111815]/20 px-2.5 py-1 text-xs font-semibold text-[#111815] hover:bg-red-50 hover:border-red-300 hover:text-red-800 cursor-pointer"
+                >
+                  <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>লক ও সাইন আউট</span>
+                </button>
               </div>
             </div>
 
@@ -887,18 +959,16 @@ export function AdminModal({
                       নিরাপত্তা ও অর্ডার সেটিংস
                     </h3>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 items-center">
-                      <div>
-                        <label className="block text-xs font-semibold text-[#111815]">
-                          অ্যাডমিন পিন পরিবর্তন করুন
-                        </label>
-                        <input
-                          type="text"
-                          value={config.restaurantInfo.adminPin}
-                          onChange={(e) => updateRestaurantInfo('adminPin', e.target.value)}
-                          className="mt-1.5 block w-full min-h-[42px] rounded-md border border-[#111815]/20 bg-white px-3 py-2 text-sm tabular-nums"
-                        />
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5 text-xs text-emerald-950">
+                        <p className="font-semibold flex items-center gap-1.5">
+                          <ShieldCheck className="h-4 w-4 text-emerald-700" aria-hidden="true" />
+                          <span>Firebase অ্যাডমিন সুরক্ষা চালু আছে</span>
+                        </p>
+                        <p className="mt-1 text-[11px] text-emerald-900/80">
+                          শুধুমাত্র অনুমোদিত Google অ্যাডমিন অ্যাকাউন্ট ({adminUserEmail}) দিয়েই এই প্যানেল ও ডেটাবেস পরিবর্তন করা যাবে।
+                        </p>
                       </div>
-                      <label className="inline-flex items-center gap-2.5 text-xs font-semibold text-[#111815] cursor-pointer sm:pt-5">
+                      <label className="inline-flex items-center gap-2.5 text-xs font-semibold text-[#111815] cursor-pointer">
                         <input
                           type="checkbox"
                           checked={config.restaurantInfo.whatsappRedirectEnabled}

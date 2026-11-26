@@ -45,7 +45,7 @@ service cloud.firestore {
         'brandName', 'heritageOrigin', 'logoUrl', 'whatsappNumber',
         'whatsappRedirectEnabled', 'displayPhone', 'email', 'address',
         'hoursDisplay', 'openHour', 'openMinute', 'closeHour', 'closeMinute',
-        'statusMode', 'isOpen', 'adminPin', 'mapsCoordinates',
+        'statusMode', 'isOpen', 'mapsCoordinates',
         'mapsUrl', 'facebookUrl', 'instagramUrl',
         'metaEnabled', 'metaPixelId', 'capiEnabled', 'metaTestEventCode',
         'metaDebugConsole', 'updatedAt'
@@ -65,7 +65,6 @@ service cloud.firestore {
       (!('closeMinute' in data) || (data.closeMinute is number && data.closeMinute >= 0 && data.closeMinute <= 59)) &&
       data.statusMode in ['auto', 'open', 'preorder'] &&
       (!('isOpen' in data) || data.isOpen is bool) &&
-      (!('adminPin' in data) || (data.adminPin is string && data.adminPin.size() >= 4 && data.adminPin.size() <= 20)) &&
       (!('mapsCoordinates' in data) || (data.mapsCoordinates is string && data.mapsCoordinates.size() <= 80)) &&
       (!('mapsUrl' in data) || (data.mapsUrl is string && data.mapsUrl.size() <= 500)) &&
       (!('facebookUrl' in data) || (data.facebookUrl is string && data.facebookUrl.size() <= 500)) &&

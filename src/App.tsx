@@ -42,6 +42,7 @@ import {
   updateOrderStatusInFirestore,
   upsertDeliveryZoneToFirestore,
   upsertMenuItemToFirestore,
+  verifyAdminAccess,
 } from './utils/firestoreService';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
@@ -83,6 +84,10 @@ export default function App() {
   const [orders, setOrders] = useState<SavedOrderRecord[]>(() => loadSavedOrders());
   const [firestoreOrders, setFirestoreOrders] = useState<SavedOrderRecord[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [adminAuthStatus, setAdminAuthStatus] = useState<
+    'checking' | 'unauthenticated' | 'unauthorized' | 'authorized'
+  >('checking');
+  const authCheckSeqRef = useRef(0);
   const [selectedZoneId, setSelectedZoneId] = useState<string>(
     () => loadAppConfig().deliveryZones[0]?.id ?? CONFIG_DEFAULTS.deliveryZones[0].id
   );
@@ -144,10 +149,26 @@ export default function App() {
     };
   }, []);
 
-  // Track Firebase Auth user for Admin features
+  // Track Firebase Auth user & verify strict Admin authorization against Firebase
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
+      const seq = ++authCheckSeqRef.current;
       setAdminUser(user);
+      if (!user) {
+        setAdminAuthStatus('unauthenticated');
+        setFirestoreOrders([]);
+        return;
+      }
+      setAdminAuthStatus('checking');
+      void verifyAdminAccess(user).then((isAllowed) => {
+        if (authCheckSeqRef.current !== seq) return;
+        if (isAllowed) {
+          setAdminAuthStatus('authorized');
+        } else {
+          setAdminAuthStatus('unauthorized');
+          setFirestoreOrders([]);
+        }
+      });
     });
     return () => unsub();
   }, []);
@@ -194,16 +215,17 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Subscribe to live Firestore orders when Admin is authenticated on the /admin route
+  // Subscribe to live Firestore orders ONLY when a verified Admin is authenticated on /admin
   useEffect(() => {
-    if (!adminUser || !adminUser.emailVerified || !isAdminRoute) {
+    if (adminAuthStatus !== 'authorized' || !isAdminRoute) {
+      setFirestoreOrders([]);
       return;
     }
     const unsub = subscribeToAdminOrders((liveOrders) => {
       setFirestoreOrders(liveOrders);
     });
     return () => unsub();
-  }, [adminUser, isAdminRoute]);
+  }, [adminAuthStatus, isAdminRoute]);
 
   // Sync MetaTracker configuration & fire initial PageView once on customer storefront
   useEffect(() => {
@@ -239,7 +261,7 @@ export default function App() {
   };
 
   const syncConfigDiffToFirestore = async (prev: AppConfig, next: AppConfig) => {
-    if (!adminUser?.emailVerified) return;
+    if (adminAuthStatus !== 'authorized') return;
 
     const tasks: Array<Promise<unknown>> = [];
 
@@ -292,6 +314,7 @@ export default function App() {
   };
 
   const handleUpdateConfig = (next: AppConfig) => {
+    if (adminAuthStatus !== 'authorized') return;
     const prev = config;
     setConfig(next);
     saveAppConfig(next);
@@ -300,12 +323,11 @@ export default function App() {
   };
 
   const handleResetDefaults = () => {
+    if (adminAuthStatus !== 'authorized') return;
     setConfig(CONFIG_DEFAULTS);
     saveAppConfig(CONFIG_DEFAULTS);
     MetaTracker.init(CONFIG_DEFAULTS.metaConfig);
-    if (adminUser?.emailVerified) {
-      void seedInitialData(CONFIG_DEFAULTS);
-    }
+    void seedInitialData(CONFIG_DEFAULTS);
   };
 
   const handleSelectZone = (zoneId: string) => {
@@ -513,15 +535,14 @@ export default function App() {
   };
 
   const handleUpdateOrderStatus = async (orderIdOrDocId: string, status: OrderStatus) => {
+    if (adminAuthStatus !== 'authorized') return;
     const cleanTarget = normalizeTrackingOrderId(orderIdOrDocId);
     setOrders((prev) =>
       prev.map((ord) =>
         normalizeTrackingOrderId(ord.orderId) === cleanTarget ? { ...ord, status } : ord
       )
     );
-    if (adminUser?.emailVerified) {
-      await updateOrderStatusInFirestore(cleanTarget, status);
-    }
+    await updateOrderStatusInFirestore(cleanTarget, status);
   };
 
   if (isAdminRoute) {
@@ -536,6 +557,7 @@ export default function App() {
         orders={orders}
         firestoreOrders={firestoreOrders}
         adminUserEmail={adminUser?.email ?? null}
+        adminAuthStatus={adminAuthStatus}
         onSignInAdmin={async () => {
           await signInAdminWithGoogle();
         }}
