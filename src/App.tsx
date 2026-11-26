@@ -27,17 +27,23 @@ import {
 import { MetaTracker } from './utils/metaTracker';
 import { auth, trackAnalyticsEvent } from './firebase';
 import {
+  type AdminAccountRecord,
+  addAdminByUidToFirestore,
+  createAdminAccountWithEmailPassword,
   createCloudCapiDispatcher,
   deleteDeliveryZoneFromFirestore,
   deleteMenuItemFromFirestore,
+  removeAdminUserFromFirestore,
   saveGeneralSettingsToFirestore,
   saveSecretSettingsToFirestore,
   saveSiteContentToFirestore,
-  seedInitialData,
+  sendAdminPasswordReset,
+  signInAdminWithEmailPassword,
   signInAdminWithGoogle,
   signOutAdmin,
   submitOrderToFirestore,
   subscribeToAdminOrders,
+  subscribeToAdminUsers,
   subscribeToStorefrontConfig,
   updateOrderStatusInFirestore,
   upsertDeliveryZoneToFirestore,
@@ -53,12 +59,6 @@ import { ReviewsAndFooter } from './components/ReviewsAndFooter';
 import { CartDrawer } from './components/CartDrawer';
 import { AdminModal } from './components/AdminModal';
 import { OrderTrackingModal } from './components/OrderTrackingModal';
-
-declare global {
-  interface Window {
-    seedInitialData?: () => Promise<{ ok: boolean; message: string }>;
-  }
-}
 
 function isAdminRouteLocation(): boolean {
   const cleanPath = window.location.pathname.replace(/\/+$/, '').toLowerCase();
@@ -83,6 +83,7 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(() => loadAppConfig());
   const [orders, setOrders] = useState<SavedOrderRecord[]>(() => loadSavedOrders());
   const [firestoreOrders, setFirestoreOrders] = useState<SavedOrderRecord[]>([]);
+  const [adminAccounts, setAdminAccounts] = useState<AdminAccountRecord[]>([]);
   const [adminUser, setAdminUser] = useState<User | null>(null);
   const [adminAuthStatus, setAdminAuthStatus] = useState<
     'checking' | 'unauthenticated' | 'unauthorized' | 'authorized'
@@ -139,13 +140,11 @@ export default function App() {
     }
   }, [isAdminRoute, config.restaurantInfo.brandName, config.restaurantInfo.heritageOrigin]);
 
-  // Register Cloud Function CAPI dispatcher & console seedInitialData helper
+  // Register Cloud Function CAPI dispatcher
   useEffect(() => {
     MetaTracker.setCapiDispatcher(createCloudCapiDispatcher());
-    window.seedInitialData = () => seedInitialData(CONFIG_DEFAULTS);
     return () => {
       MetaTracker.setCapiDispatcher(null);
-      delete window.seedInitialData;
     };
   }, []);
 
@@ -215,16 +214,23 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Subscribe to live Firestore orders ONLY when a verified Admin is authenticated on /admin
+  // Subscribe to live Firestore orders & admin list ONLY when a verified Admin is authenticated on /admin
   useEffect(() => {
     if (adminAuthStatus !== 'authorized' || !isAdminRoute) {
       setFirestoreOrders([]);
+      setAdminAccounts([]);
       return;
     }
-    const unsub = subscribeToAdminOrders((liveOrders) => {
+    const unsubOrders = subscribeToAdminOrders((liveOrders) => {
       setFirestoreOrders(liveOrders);
     });
-    return () => unsub();
+    const unsubAdmins = subscribeToAdminUsers((liveAdmins) => {
+      setAdminAccounts(liveAdmins);
+    });
+    return () => {
+      unsubOrders();
+      unsubAdmins();
+    };
   }, [adminAuthStatus, isAdminRoute]);
 
   // Sync MetaTracker configuration & fire initial PageView once on customer storefront
@@ -320,14 +326,6 @@ export default function App() {
     saveAppConfig(next);
     MetaTracker.init(next.metaConfig);
     void syncConfigDiffToFirestore(prev, next);
-  };
-
-  const handleResetDefaults = () => {
-    if (adminAuthStatus !== 'authorized') return;
-    setConfig(CONFIG_DEFAULTS);
-    saveAppConfig(CONFIG_DEFAULTS);
-    MetaTracker.init(CONFIG_DEFAULTS.metaConfig);
-    void seedInitialData(CONFIG_DEFAULTS);
   };
 
   const handleSelectZone = (zoneId: string) => {
@@ -553,16 +551,38 @@ export default function App() {
         onClose={handleExitAdminRoute}
         config={config}
         onUpdateConfig={handleUpdateConfig}
-        onResetDefaults={handleResetDefaults}
         orders={orders}
         firestoreOrders={firestoreOrders}
+        adminAccounts={adminAccounts}
+        adminUserUid={adminUser?.uid ?? null}
         adminUserEmail={adminUser?.email ?? null}
         adminAuthStatus={adminAuthStatus}
         onSignInAdmin={async () => {
           await signInAdminWithGoogle();
         }}
+        onSignInWithEmailPassword={async (email, password) => {
+          await signInAdminWithEmailPassword(email, password);
+        }}
+        onSendPasswordReset={sendAdminPasswordReset}
         onSignOutAdmin={signOutAdmin}
-        onSeedFirestore={() => seedInitialData(config)}
+        onCreateAdminAccount={async (params) => {
+          if (adminAuthStatus !== 'authorized') {
+            throw new Error('অ্যাডমিন অনুমোদন ছাড়া নতুন অ্যাডমিন তৈরি করা যাবে না।');
+          }
+          await createAdminAccountWithEmailPassword(params);
+        }}
+        onAddAdminByUid={async (params) => {
+          if (adminAuthStatus !== 'authorized') {
+            throw new Error('অ্যাডমিন অনুমোদন ছাড়া নতুন অ্যাডমিন যোগ করা যাবে না।');
+          }
+          await addAdminByUidToFirestore(params);
+        }}
+        onRemoveAdminAccount={async (uid) => {
+          if (adminAuthStatus !== 'authorized') {
+            throw new Error('অ্যাডমিন অনুমোদন ছাড়া অ্যাডমিন মুছা যাবে না।');
+          }
+          await removeAdminUserFromFirestore(uid);
+        }}
         onUpdateOrderStatus={handleUpdateOrderStatus}
         onSaveSecretsToFirestore={saveSecretSettingsToFirestore}
       />

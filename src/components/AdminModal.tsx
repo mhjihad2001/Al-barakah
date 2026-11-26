@@ -6,30 +6,34 @@ import {
   Check,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   Lock,
   Loader2,
   LogOut,
+  Mail,
   Pencil,
   Plus,
-  RotateCcw,
   Send,
   ShieldAlert,
   ShieldCheck,
   Trash2,
   Upload,
+  UserPlus,
+  Users,
   UtensilsCrossed,
   X,
 } from 'lucide-react';
 import {
   type AppConfig,
   CONFIG_DEFAULTS,
-  DEFAULT_SITE_CONTENT,
   type DeliverySubArea,
   type DeliveryZone,
   type MenuCategory,
   type MenuItem,
   type StoreStatusMode,
 } from '../data/restaurantConfig';
+import { type AdminAccountRecord, PRIMARY_ADMIN_EMAIL } from '../utils/firestoreService';
 import { uploadMenuImage } from '../utils/imageUpload';
 import { type MetaEventLogEntry, MetaTracker } from '../utils/metaTracker';
 import {
@@ -49,19 +53,32 @@ interface AdminModalProps {
   onClose: () => void;
   config: AppConfig;
   onUpdateConfig: (next: AppConfig) => void;
-  onResetDefaults: () => void;
   orders: SavedOrderRecord[];
   firestoreOrders: SavedOrderRecord[];
+  adminAccounts: AdminAccountRecord[];
+  adminUserUid: string | null;
   adminUserEmail: string | null;
   adminAuthStatus: 'checking' | 'unauthenticated' | 'unauthorized' | 'authorized';
   onSignInAdmin: () => Promise<void>;
+  onSignInWithEmailPassword: (email: string, password: string) => Promise<void>;
+  onSendPasswordReset: (email: string) => Promise<void>;
   onSignOutAdmin: () => Promise<void>;
-  onSeedFirestore: () => Promise<{ ok: boolean; message: string }>;
+  onCreateAdminAccount: (params: {
+    email: string;
+    password: string;
+    displayName?: string;
+  }) => Promise<void>;
+  onAddAdminByUid: (params: {
+    uid: string;
+    email: string;
+    displayName?: string;
+  }) => Promise<void>;
+  onRemoveAdminAccount: (uid: string) => Promise<void>;
   onUpdateOrderStatus: (orderIdOrDocId: string, status: OrderStatus) => Promise<void>;
   onSaveSecretsToFirestore: (token: string, endpoint: string) => Promise<void>;
 }
 
-type AdminTab = 'general' | 'content' | 'menu' | 'zones' | 'meta' | 'orders';
+type AdminTab = 'general' | 'content' | 'menu' | 'zones' | 'meta' | 'orders' | 'admins';
 
 const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'general', label: 'সাধারণ তথ্য' },
@@ -70,6 +87,7 @@ const ADMIN_TABS: Array<{ id: AdminTab; label: string }> = [
   { id: 'zones', label: 'ডেলিভারি জোন' },
   { id: 'meta', label: 'মেটা অ্যাডস ও ট্র্যাকিং' },
   { id: 'orders', label: 'অর্ডার হিস্ট্রি ও ব্যাকআপ' },
+  { id: 'admins', label: 'অ্যাডমিন পরিচালনা' },
 ];
 
 const CATEGORY_OPTIONS: MenuCategory[] = [
@@ -84,21 +102,46 @@ export function AdminModal({
   onClose,
   config,
   onUpdateConfig,
-  onResetDefaults,
   orders,
   firestoreOrders,
+  adminAccounts,
+  adminUserUid,
   adminUserEmail,
   adminAuthStatus,
   onSignInAdmin,
+  onSignInWithEmailPassword,
+  onSendPasswordReset,
   onSignOutAdmin,
-  onSeedFirestore,
+  onCreateAdminAccount,
+  onAddAdminByUid,
+  onRemoveAdminAccount,
   onUpdateOrderStatus,
   onSaveSecretsToFirestore,
 }: AdminModalProps) {
   const [authError, setAuthError] = useState('');
+  const [resetSentMsg, setResetSentMsg] = useState('');
   const [activeTab, setActiveTab] = useState<AdminTab>('general');
   const [saveBanner, setSaveBanner] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
+
+  // Email/Password Admin Login Form State
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+
+  // New Admin Management State
+  const [newAdminName, setNewAdminName] = useState('');
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [showNewAdminPassword, setShowNewAdminPassword] = useState(false);
+  const [adminActionBusy, setAdminActionBusy] = useState(false);
+  const [adminActionError, setAdminActionError] = useState('');
+  const [adminActionSuccess, setAdminActionSuccess] = useState('');
+  const [showUidHelper, setShowUidHelper] = useState(false);
+  const [existingAdminUid, setExistingAdminUid] = useState('');
+  const [existingAdminEmail, setExistingAdminEmail] = useState('');
+  const [existingAdminName, setExistingAdminName] = useState('');
+  const [removingUid, setRemovingUid] = useState<string | null>(null);
 
   // New Menu Item State
   const [newDishName, setNewDishName] = useState('');
@@ -156,25 +199,205 @@ export function AdminModal({
     setTimeout(() => setSaveBanner(''), 2500);
   };
 
+  const mapAuthErrorToBengali = (err: unknown): string => {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code: unknown }).code)
+        : '';
+    switch (code) {
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+      case 'auth/user-not-found':
+        return 'ইমেইল বা পাসওয়ার্ড সঠিক নয়। অনুগ্রহ করে আবার যাচাই করুন।';
+      case 'auth/invalid-email':
+        return 'সঠিক ফরম্যাটের ইমেইল ঠিকানা লিখুন।';
+      case 'auth/too-many-requests':
+        return 'অতিরিক্ত ভুল চেষ্টার কারণে সাময়িকভাবে লগইন বন্ধ রয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
+      case 'auth/operation-not-allowed':
+        return 'Firebase Console-এ Email/Password সাইন-ইন পদ্ধতি এখনো চালু করা হয়নি। Authentication > Sign-in method থেকে Email/Password চালু করুন।';
+      case 'auth/network-request-failed':
+        return 'ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।';
+      case 'auth/popup-closed-by-user':
+        return 'Google সাইন-ইন উইন্ডো বন্ধ হয়ে গেছে। আবার চেষ্টা করুন।';
+      case 'auth/popup-blocked':
+        return 'ব্রাউজার পপ-আপ ব্লক করেছে। পপ-আপ অনুমতি দিয়ে আবার চেষ্টা করুন।';
+      default:
+        return err instanceof Error && err.message
+          ? err.message
+          : 'সাইন-ইন সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।';
+    }
+  };
+
+  const handleEmailPasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setResetSentMsg('');
+
+    const trimmedEmail = loginEmail.trim();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setAuthError('অনুগ্রহ করে একটি সঠিক অ্যাডমিন ইমেইল লিখুন।');
+      return;
+    }
+    if (!loginPassword || loginPassword.length < 6) {
+      setAuthError('কমপক্ষে ৬ অক্ষরের পাসওয়ার্ড দিন।');
+      return;
+    }
+
+    setAuthBusy(true);
+    try {
+      await onSignInWithEmailPassword(trimmedEmail, loginPassword);
+      setLoginPassword('');
+    } catch (err) {
+      setAuthError(mapAuthErrorToBengali(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    setAuthError('');
+    setResetSentMsg('');
+    const trimmedEmail = loginEmail.trim();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setAuthError('পাসওয়ার্ড রিসেট লিংক পেতে আগে উপরে আপনার ইমেইল ঠিকানা লিখুন।');
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      await onSendPasswordReset(trimmedEmail);
+      setResetSentMsg(
+        `${trimmedEmail} ঠিকানায় পাসওয়ার্ড রিসেট লিংক পাঠানো হয়েছে। ইনবক্স বা স্প্যাম ফোল্ডার দেখুন।`
+      );
+    } catch (err) {
+      setAuthError(mapAuthErrorToBengali(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   const handleGoogleAdminLogin = async () => {
     setAuthError('');
+    setResetSentMsg('');
     setAuthBusy(true);
     try {
       await onSignInAdmin();
+    } catch (err) {
+      setAuthError(mapAuthErrorToBengali(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminActionError('');
+    setAdminActionSuccess('');
+
+    const trimmedEmail = newAdminEmail.trim().toLowerCase();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setAdminActionError('নতুন অ্যাডমিনের জন্য একটি সঠিক ইমেইল ঠিকানা দিন।');
+      return;
+    }
+    if (newAdminPassword.length < 6) {
+      setAdminActionError('নিরাপত্তার জন্য পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+      return;
+    }
+
+    setAdminActionBusy(true);
+    try {
+      await onCreateAdminAccount({
+        email: trimmedEmail,
+        password: newAdminPassword,
+        displayName: newAdminName.trim() || undefined,
+      });
+      setNewAdminName('');
+      setNewAdminEmail('');
+      setNewAdminPassword('');
+      setAdminActionSuccess('নতুন অ্যাডমিন অ্যাকাউন্ট তৈরি ও অনুমোদিত হয়েছে।');
+      flashBanner('নতুন অ্যাডমিন অ্যাকাউন্ট সফলভাবে যোগ করা হয়েছে।');
     } catch (err) {
       const code =
         typeof err === 'object' && err !== null && 'code' in err
           ? String((err as { code: unknown }).code)
           : '';
-      if (code === 'auth/popup-closed-by-user') {
-        setAuthError('Google সাইন-ইন উইন্ডো বন্ধ হয়ে গেছে। আবার চেষ্টা করুন।');
-      } else if (code === 'auth/popup-blocked') {
-        setAuthError('ব্রাউজার পপ-আপ ব্লক করেছে। পপ-আপ অনুমতি দিয়ে আবার চেষ্টা করুন।');
+      if (code === 'auth/email-already-in-use') {
+        setAdminActionError(
+          'এই ইমেইল দিয়ে ইতিমধ্যেই Firebase-এ অ্যাকাউন্ট তৈরি আছে। ওই অ্যাকাউন্টের UID থাকলে নিচের UID অপশন দিয়ে যোগ করুন।'
+        );
+      } else if (code === 'auth/weak-password') {
+        setAdminActionError('পাসওয়ার্ডটি অত্যন্ত দুর্বল। আরও শক্তিশালী পাসওয়ার্ড দিন (কমপক্ষে ৬ অক্ষর)।');
+      } else if (code === 'auth/operation-not-allowed') {
+        setAdminActionError(
+          'Firebase Console-এ Email/Password সাইন-ইন পদ্ধতি এখনো বন্ধ আছে। সেটি চালু করে আবার চেষ্টা করুন।'
+        );
       } else {
-        setAuthError('Google সাইন-ইন সম্পন্ন করা যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।');
+        setAdminActionError(
+          err instanceof Error && err.message
+            ? err.message
+            : 'নতুন অ্যাডমিন তৈরি করা যায়নি। আবার চেষ্টা করুন।'
+        );
       }
     } finally {
-      setAuthBusy(false);
+      setAdminActionBusy(false);
+    }
+  };
+
+  const handleAddExistingUid = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminActionError('');
+    setAdminActionSuccess('');
+
+    const trimmedUid = existingAdminUid.trim();
+    const trimmedEmail = existingAdminEmail.trim().toLowerCase();
+    if (!trimmedUid || trimmedUid.length < 10) {
+      setAdminActionError('সঠিক Firebase Auth UID দিন।');
+      return;
+    }
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setAdminActionError('অ্যাডমিনের সঠিক ইমেইল দিন।');
+      return;
+    }
+
+    setAdminActionBusy(true);
+    try {
+      await onAddAdminByUid({
+        uid: trimmedUid,
+        email: trimmedEmail,
+        displayName: existingAdminName.trim() || undefined,
+      });
+      setExistingAdminUid('');
+      setExistingAdminEmail('');
+      setExistingAdminName('');
+      setAdminActionSuccess('বিদ্যমান UID অ্যাডমিন তালিকায় অনুমোদিত হয়েছে।');
+      flashBanner('বিদ্যমান অ্যাডমিন UID সফলভাবে যোগ হয়েছে।');
+    } catch (err) {
+      setAdminActionError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'UID দিয়ে অ্যাডমিন যোগ করা যায়নি।'
+      );
+    } finally {
+      setAdminActionBusy(false);
+    }
+  };
+
+  const handleRemoveAdmin = async (acc: AdminAccountRecord) => {
+    if (acc.uid === adminUserUid) return;
+    setAdminActionError('');
+    setAdminActionSuccess('');
+    setRemovingUid(acc.uid);
+    try {
+      await onRemoveAdminAccount(acc.uid);
+      setAdminActionSuccess(`${acc.email} এর অ্যাডমিন অ্যাক্সেস বাতিল করা হয়েছে।`);
+      flashBanner('অ্যাডমিন অ্যাক্সেস বাতিল করা হয়েছে।');
+    } catch (err) {
+      setAdminActionError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'অ্যাডমিন অ্যাক্সেস বাতিল করা যায়নি।'
+      );
+    } finally {
+      setRemovingUid(null);
     }
   };
 
@@ -497,7 +720,7 @@ export function AdminModal({
             </p>
           </div>
         ) : adminAuthStatus === 'unauthenticated' ? (
-          /* Mandatory Firebase Google Admin Sign-In Gate */
+          /* Mandatory Firebase Admin Sign-In Gate (Email/Password + Google fallback) */
           <div
             data-testid="admin-auth-gate"
             className="flex flex-1 items-center justify-center p-6 sm:p-10"
@@ -512,30 +735,112 @@ export function AdminModal({
                     সুরক্ষিত অ্যাডমিন লগইন
                   </h3>
                   <p className="text-xs text-[#525B56]">
-                    Firebase Authentication সুরক্ষিত প্রবেশদ্বার
+                    ইমেইল ও পাসওয়ার্ড দিয়ে প্রবেশ করুন
                   </p>
                 </div>
               </div>
 
               <p className="mt-4 text-xs leading-relaxed text-[#2C3530]">
-                অ্যাডমিন প্যানেলটি শুধুমাত্র অনুমোদিত রেস্তোরাঁ অ্যাডমিনের জন্য সংরক্ষিত। মেনু, অর্ডার ও ডেলিভারি সেটিংস পরিচালনা করতে আপনার অনুমোদিত Google অ্যাডমিন অ্যাকাউন্ট দিয়ে সাইন-ইন করুন।
+                অ্যাডমিন প্যানেলটি শুধুমাত্র অনুমোদিত রেস্তোরাঁ অ্যাডমিনের জন্য সংরক্ষিত। আপনার অনুমোদিত ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।
               </p>
 
               {authError && (
                 <p
                   role="alert"
+                  data-testid="admin-auth-error"
                   className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800"
                 >
                   {authError}
                 </p>
               )}
 
-              <div className="mt-6 space-y-2.5">
+              {resetSentMsg && (
+                <p
+                  role="status"
+                  className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800"
+                >
+                  {resetSentMsg}
+                </p>
+              )}
+
+              <form onSubmit={handleEmailPasswordLogin} noValidate className="mt-5 space-y-3.5">
+                <div>
+                  <label
+                    htmlFor="admin-login-email"
+                    className="block text-xs font-semibold text-[#111815]"
+                  >
+                    অ্যাডমিন ইমেইল
+                  </label>
+                  <div className="relative mt-1">
+                    <Mail
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#525B56]"
+                      aria-hidden="true"
+                    />
+                    <input
+                      id="admin-login-email"
+                      data-testid="admin-login-email"
+                      type="email"
+                      autoComplete="email"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      placeholder="admin@albarakah.com"
+                      className="block w-full rounded-md border border-[#111815]/20 bg-white py-2.5 pl-9 pr-3 text-sm text-[#111815] focus:border-[#111815] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="admin-login-password"
+                      className="block text-xs font-semibold text-[#111815]"
+                    >
+                      পাসওয়ার্ড
+                    </label>
+                    <button
+                      type="button"
+                      disabled={authBusy}
+                      data-testid="admin-reset-password-btn"
+                      onClick={() => void handlePasswordReset()}
+                      className="text-[11px] font-semibold text-[#9C7B38] hover:text-[#111815] underline-offset-2 hover:underline cursor-pointer disabled:opacity-50"
+                    >
+                      পাসওয়ার্ড ভুলে গেছেন?
+                    </button>
+                  </div>
+                  <div className="relative mt-1">
+                    <Lock
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#525B56]"
+                      aria-hidden="true"
+                    />
+                    <input
+                      id="admin-login-password"
+                      data-testid="admin-login-password"
+                      type={showLoginPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="block w-full rounded-md border border-[#111815]/20 bg-white py-2.5 pl-9 pr-10 text-sm text-[#111815] focus:border-[#111815] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword((prev) => !prev)}
+                      aria-label={showLoginPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-[#525B56] hover:text-[#111815] cursor-pointer"
+                    >
+                      {showLoginPassword ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  type="button"
+                  type="submit"
                   disabled={authBusy}
-                  onClick={() => void handleGoogleAdminLogin()}
-                  data-testid="admin-google-signin-btn"
+                  data-testid="admin-email-login-btn"
                   className="inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-md bg-[#111815] px-5 py-2.5 text-sm font-semibold text-[#C5A059] hover:bg-[#1E2B25] disabled:opacity-60 cursor-pointer"
                 >
                   {authBusy ? (
@@ -543,15 +848,32 @@ export function AdminModal({
                   ) : (
                     <ShieldCheck className="h-4 w-4" aria-hidden="true" />
                   )}
-                  <span>
-                    {authBusy ? 'সাইন-ইন হচ্ছে...' : 'Google অ্যাডমিন অ্যাকাউন্ট দিয়ে সাইন-ইন করুন'}
-                  </span>
+                  <span>{authBusy ? 'যাচাই করা হচ্ছে...' : 'লগইন করুন'}</span>
+                </button>
+              </form>
+
+              <div className="my-5 flex items-center gap-3 text-[11px] text-[#525B56]">
+                <div className="h-px flex-1 bg-[#111815]/15" />
+                <span>অথবা</span>
+                <div className="h-px flex-1 bg-[#111815]/15" />
+              </div>
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={() => void handleGoogleAdminLogin()}
+                  data-testid="admin-google-signin-btn"
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-md border border-[#111815]/25 bg-white px-4 py-2 text-xs font-semibold text-[#111815] hover:bg-[#EFE8DA] disabled:opacity-60 cursor-pointer"
+                >
+                  <ShieldCheck className="h-4 w-4 text-[#111815]" aria-hidden="true" />
+                  <span>Google অ্যাডমিন অ্যাকাউন্ট দিয়ে সাইন-ইন করুন</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={onClose}
-                  className="inline-flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-md border border-[#111815]/20 bg-white px-4 py-2 text-xs font-semibold text-[#111815] hover:bg-[#EFE8DA] cursor-pointer"
+                  className="inline-flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-md border border-[#111815]/15 bg-transparent px-4 py-2 text-xs font-semibold text-[#525B56] hover:bg-[#EFE8DA] hover:text-[#111815] cursor-pointer"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                   <span>মূল ওয়েবসাইটে ফিরে যান</span>
@@ -618,22 +940,6 @@ export function AdminModal({
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={authBusy}
-                  onClick={async () => {
-                    setAuthBusy(true);
-                    try {
-                      const res = await onSeedFirestore();
-                      flashBanner(res.message);
-                    } finally {
-                      setAuthBusy(false);
-                    }
-                  }}
-                  className="rounded border border-[#C5A059] bg-[#C5A059]/15 px-2.5 py-1 text-xs font-semibold text-[#111815] hover:bg-[#C5A059]/30 cursor-pointer disabled:opacity-50"
-                >
-                  ডিফল্ট ডেটা সিড করুন
-                </button>
                 <button
                   type="button"
                   onClick={() => void onSignOutAdmin()}
@@ -996,13 +1302,6 @@ export function AdminModal({
                       siteContent: nextSiteContent,
                     })
                   }
-                  onResetDefaultCopy={() => {
-                    onUpdateConfig({
-                      ...config,
-                      siteContent: DEFAULT_SITE_CONTENT,
-                    });
-                    flashBanner('পেজের সব লেখা ডিফল্টে ফিরিয়ে আনা হয়েছে।');
-                  }}
                 />
               )}
 
@@ -1933,18 +2232,6 @@ export function AdminModal({
                         <Download className="h-4 w-4" aria-hidden="true" />
                         <span>JSON ডাউনলোড</span>
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onResetDefaults();
-                          flashBanner('ডিফল্ট কনফিগারেশন রিসেট করা হয়েছে।');
-                        }}
-                        className="inline-flex min-h-[40px] items-center gap-2 rounded-md border border-red-300 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800 hover:bg-red-100 cursor-pointer"
-                      >
-                        <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                        <span>ডিফল্ট রিসেট</span>
-                      </button>
                     </div>
 
                     <div className="pt-2">
@@ -1974,6 +2261,273 @@ export function AdminModal({
                 </div>
                 );
               })()}
+
+              {/* TAB 7: Admin Access & New Admin Management */}
+              {activeTab === 'admins' && (
+                <div className="space-y-6" data-testid="admin-management-tab">
+                  {/* Create New Email & Password Admin */}
+                  <form
+                    onSubmit={handleCreateAdmin}
+                    noValidate
+                    className="rounded-lg border border-[#111815]/15 bg-[#FFFDF9] p-5 space-y-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#111815] text-[#C5A059]">
+                        <UserPlus className="h-5 w-5" aria-hidden="true" />
+                      </div>
+                      <div>
+                        <h3 className="font-serif text-lg font-semibold text-[#111815]">
+                          নতুন অ্যাডমিন যোগ করুন (ইমেইল ও পাসওয়ার্ড)
+                        </h3>
+                        <p className="text-xs text-[#525B56]">
+                          এখান থেকে নতুন অ্যাডমিন তৈরি করলে আপনার বর্তমান সেশন লগ-আউট হবে না এবং নতুন অ্যাডমিন সরাসরি ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করতে পারবেন।
+                        </p>
+                      </div>
+                    </div>
+
+                    {adminActionError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800"
+                      >
+                        {adminActionError}
+                      </p>
+                    )}
+
+                    {adminActionSuccess && (
+                      <p
+                        role="status"
+                        className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800"
+                      >
+                        {adminActionSuccess}
+                      </p>
+                    )}
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <label
+                          htmlFor="new-admin-name"
+                          className="block text-xs font-semibold text-[#111815]"
+                        >
+                          অ্যাডমিনের নাম (ঐচ্ছিক)
+                        </label>
+                        <input
+                          id="new-admin-name"
+                          type="text"
+                          value={newAdminName}
+                          onChange={(e) => setNewAdminName(e.target.value)}
+                          placeholder="যেমন: ম্যানেজার রাকিব"
+                          className="mt-1 block w-full rounded-md border border-[#111815]/20 bg-white px-3 py-2 text-sm text-[#111815]"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="new-admin-email"
+                          className="block text-xs font-semibold text-[#111815]"
+                        >
+                          নতুন অ্যাডমিন ইমেইল *
+                        </label>
+                        <input
+                          id="new-admin-email"
+                          data-testid="new-admin-email-input"
+                          type="email"
+                          value={newAdminEmail}
+                          onChange={(e) => setNewAdminEmail(e.target.value)}
+                          placeholder="manager@albarakah.com"
+                          className="mt-1 block w-full rounded-md border border-[#111815]/20 bg-white px-3 py-2 text-sm text-[#111815]"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="new-admin-password"
+                          className="block text-xs font-semibold text-[#111815]"
+                        >
+                          পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর) *
+                        </label>
+                        <div className="relative mt-1">
+                          <input
+                            id="new-admin-password"
+                            data-testid="new-admin-password-input"
+                            type={showNewAdminPassword ? 'text' : 'password'}
+                            value={newAdminPassword}
+                            onChange={(e) => setNewAdminPassword(e.target.value)}
+                            placeholder="••••••"
+                            className="block w-full rounded-md border border-[#111815]/20 bg-white py-2 pl-3 pr-9 text-sm text-[#111815]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewAdminPassword((p) => !p)}
+                            aria-label={showNewAdminPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-[#525B56] hover:text-[#111815] cursor-pointer"
+                          >
+                            {showNewAdminPassword ? (
+                              <EyeOff className="h-4 w-4" aria-hidden="true" />
+                            ) : (
+                              <Eye className="h-4 w-4" aria-hidden="true" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="submit"
+                        disabled={adminActionBusy}
+                        data-testid="create-admin-submit-btn"
+                        className="inline-flex min-h-[42px] items-center gap-2 rounded-md bg-[#111815] px-5 py-2 text-xs font-semibold text-[#C5A059] hover:bg-[#1E2B25] disabled:opacity-60 cursor-pointer"
+                      >
+                        {adminActionBusy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Plus className="h-4 w-4" aria-hidden="true" />
+                        )}
+                        <span>নতুন অ্যাডমিন তৈরি করুন</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Authorized Admins Directory */}
+                  <div className="rounded-lg border border-[#111815]/15 bg-[#FFFDF9] p-5 space-y-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-5 w-5 text-[#111815]" aria-hidden="true" />
+                        <h3 className="font-serif text-lg font-semibold text-[#111815]">
+                          অনুমোদিত অ্যাডমিন তালিকা
+                        </h3>
+                      </div>
+                      <span className="rounded bg-[#EFE8DA] px-2.5 py-0.5 text-xs font-semibold text-[#111815]">
+                        মোট {toBengaliDigits(adminAccounts.length + 1)} জন
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {/* Primary Owner Card */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#C5A059]/50 bg-[#C5A059]/10 px-4 py-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-[#111815]">
+                              {PRIMARY_ADMIN_EMAIL}
+                            </span>
+                            <span className="rounded bg-[#111815] px-2 py-0.5 text-[11px] font-semibold text-[#C5A059]">
+                              প্রধান অ্যাডমিন (মালিক)
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-[#525B56]">
+                            স্থায়ী মালিকানা অ্যাকাউন্ট — ওয়েব ও মোবাইল অ্যাডমিন অ্যাপে সর্বদা অনুমোদিত।
+                          </p>
+                        </div>
+                      </div>
+
+                      {adminAccounts.length === 0 ? (
+                        <p className="rounded-md border border-dashed border-[#111815]/20 bg-[#FAF6F0] px-4 py-3 text-xs text-[#525B56]">
+                          এখনো অতিরিক্ত কোনো অ্যাডমিন যোগ করা হয়নি। উপরের ফর্ম থেকে নতুন অ্যাডমিন তৈরি করুন।
+                        </p>
+                      ) : (
+                        adminAccounts.map((acc) => {
+                          const isSelf = acc.uid === adminUserUid;
+                          const isRemoving = removingUid === acc.uid;
+                          return (
+                            <div
+                              key={acc.uid}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#111815]/15 bg-white px-4 py-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-semibold text-[#111815]">
+                                    {acc.displayName || acc.email}
+                                  </span>
+                                  {acc.displayName && (
+                                    <span className="text-xs text-[#525B56]">{acc.email}</span>
+                                  )}
+                                  {isSelf && (
+                                    <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                                      আপনি
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-0.5 font-mono text-[11px] text-[#525B56]">
+                                  UID: {acc.uid}
+                                  {acc.addedBy ? ` • যোগ করেছেন: ${acc.addedBy}` : ''}
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={isSelf || isRemoving}
+                                onClick={() => void handleRemoveAdmin(acc)}
+                                title={
+                                  isSelf
+                                    ? 'নিজের অ্যাডমিন অ্যাক্সেস নিজে বাতিল করা যাবে না'
+                                    : 'অ্যাডমিন অ্যাক্সেস বাতিল করুন'
+                                }
+                                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100 disabled:opacity-45 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                {isRemoving ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                )}
+                                <span>অ্যাক্সেস বাতিল</span>
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Collapsible Existing Firebase UID Helper */}
+                    <div className="border-t border-[#111815]/10 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowUidHelper((prev) => !prev)}
+                        className="text-xs font-semibold text-[#111815] underline-offset-2 hover:underline cursor-pointer"
+                      >
+                        {showUidHelper
+                          ? 'বিদ্যমান Firebase UID ফর্ম লুকান'
+                          : 'বিদ্যমান Firebase UID দিয়ে অ্যাডমিন যোগ করুন'}
+                      </button>
+
+                      {showUidHelper && (
+                        <form onSubmit={handleAddExistingUid} className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <input
+                            type="text"
+                            value={existingAdminUid}
+                            onChange={(e) => setExistingAdminUid(e.target.value)}
+                            placeholder="Firebase Auth UID"
+                            className="rounded-md border border-[#111815]/20 bg-white px-3 py-2 font-mono text-xs text-[#111815]"
+                          />
+                          <input
+                            type="email"
+                            value={existingAdminEmail}
+                            onChange={(e) => setExistingAdminEmail(e.target.value)}
+                            placeholder="অ্যাডমিন ইমেইল"
+                            className="rounded-md border border-[#111815]/20 bg-white px-3 py-2 text-xs text-[#111815]"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={existingAdminName}
+                              onChange={(e) => setExistingAdminName(e.target.value)}
+                              placeholder="নাম (ঐচ্ছিক)"
+                              className="min-w-0 flex-1 rounded-md border border-[#111815]/20 bg-white px-3 py-2 text-xs text-[#111815]"
+                            />
+                            <button
+                              type="submit"
+                              disabled={adminActionBusy}
+                              className="shrink-0 rounded-md bg-[#111815] px-3 py-2 text-xs font-semibold text-[#C5A059] cursor-pointer disabled:opacity-50"
+                            >
+                              যোগ করুন
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

@@ -196,11 +196,14 @@
     },
     "AdminUser": {
       "title": "AdminUser",
-      "description": "Authorized admin UID registry.",
+      "description": "Authorized admin UID registry managed by verified admins.",
       "type": "object",
       "properties": {
-        "email": { "type": "string", "maxLength": 120 },
-        "role": { "type": "string", "enum": ["admin"] }
+        "email": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "addedBy": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["email", "role"]
     }

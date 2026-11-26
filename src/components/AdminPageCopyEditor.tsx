@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import {
   type CustomerReview,
   type HeritageDish,
@@ -11,7 +11,6 @@ interface AdminPageCopyEditorProps {
   siteContent: SiteContent;
   menuItems: MenuItem[];
   onChange: (next: SiteContent) => void;
-  onResetDefaultCopy: () => void;
 }
 
 type CopySectionId = 'nav-hero' | 'heritage' | 'menu-catering' | 'reviews' | 'footer';
@@ -34,7 +33,6 @@ export function AdminPageCopyEditor({
   siteContent,
   menuItems,
   onChange,
-  onResetDefaultCopy,
 }: AdminPageCopyEditorProps) {
   const [section, setSection] = useState<CopySectionId>('nav-hero');
 
@@ -205,14 +203,6 @@ export function AdminPageCopyEditor({
             নেভবার, হিরো, স্পেশাল পদ, মেনু, ক্যাটারিং, গ্রাহকদের রিভিউ ও ফুটারের প্রতিটি লেখা পরিবর্তন করলে সাথে সাথে মূল পেজে আপডেট হবে।
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onResetDefaultCopy}
-          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-md border border-[#111815]/20 bg-[#FAF6F0] px-3 py-1.5 text-xs font-semibold text-[#111815] hover:bg-[#EFE8DA] cursor-pointer"
-        >
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>ডিফল্ট লেখায় ফিরিয়ে আনুন</span>
-        </button>
       </div>
 
       {/* Sub-Section Switcher */}

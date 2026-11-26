@@ -26,12 +26,20 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() &&
-        request.auth.token.email_verified == true &&
-        (
-          request.auth.token.email == 'mhjihad2001@gmail.com' ||
-          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        );
+      return isSignedIn() && (
+        (request.auth.token.email == 'mhjihad2001@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'role']) &&
+        data.keys().hasOnly(['email', 'displayName', 'role', 'addedBy', 'createdAt']) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+        data.role == 'admin' &&
+        (!('addedBy' in data) || (data.addedBy is string && data.addedBy.size() <= 120)) &&
+        (!('createdAt' in data) || data.createdAt is timestamp);
     }
 
     // --- Validation Blueprints (Anti-Update-Gap) ---
@@ -304,9 +312,12 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow get: if isValidId(uid) && (isAdmin() || (isSignedIn() && request.auth.uid == uid));
       allow list: if isAdmin();
-      allow write: if false;
+      allow create: if isAdmin() && isValidId(uid) && isValidAdminUser(incoming()) &&
+        (!('createdAt' in incoming()) || incoming().createdAt == request.time);
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(uid) && request.auth.uid != uid;
     }
 
     match /test/{docId} {

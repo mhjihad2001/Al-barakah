@@ -1,4 +1,15 @@
-import { signInWithPopup, signOut, type User } from 'firebase/auth';
+import { deleteApp, getApps, initializeApp } from 'firebase/app';
+import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  inMemoryPersistence,
+  sendPasswordResetEmail,
+  setPersistence,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  type User,
+} from 'firebase/auth';
 import {
   arrayUnion,
   collection,
@@ -34,6 +45,7 @@ import {
   googleProvider,
   handleFirestoreError,
   OperationType,
+  resolvedFirebaseConfig,
 } from '../firebase';
 import {
   type MetaCapiDispatcher,
@@ -123,9 +135,27 @@ function timestampToIso(ts: unknown): string {
 
 export const PRIMARY_ADMIN_EMAIL = 'mhjihad2001@gmail.com';
 
+export interface AdminAccountRecord {
+  uid: string;
+  email: string;
+  displayName?: string;
+  role: 'admin';
+  addedBy?: string;
+  createdAtIso?: string;
+}
+
 export async function signInAdminWithGoogle() {
   const credential = await signInWithPopup(auth, googleProvider);
   return credential.user;
+}
+
+export async function signInAdminWithEmailPassword(email: string, password: string) {
+  const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+  return credential.user;
+}
+
+export async function sendAdminPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email.trim());
 }
 
 export async function signOutAdmin() {
@@ -134,12 +164,12 @@ export async function signOutAdmin() {
 
 /**
  * Verifies whether a signed-in Firebase user is an authorized restaurant admin:
- * requires verified email AND either matches the primary admin email or exists in /admins/{uid}.
+ * either verified primary admin email OR explicitly registered by UID in /admins/{uid}.
  * Mirrors the server-side isAdmin() rule in firestore.rules.
  */
 export async function verifyAdminAccess(user: User | null): Promise<boolean> {
-  if (!user || !user.emailVerified) return false;
-  if (user.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL) {
+  if (!user) return false;
+  if (user.email?.toLowerCase() === PRIMARY_ADMIN_EMAIL && user.emailVerified) {
     return true;
   }
   try {
@@ -147,6 +177,134 @@ export async function verifyAdminAccess(user: User | null): Promise<boolean> {
     return adminDoc.exists();
   } catch {
     return false;
+  }
+}
+
+export function subscribeToAdminUsers(
+  onAdmins: (admins: AdminAccountRecord[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, 'admins'),
+    (snap) => {
+      const list: AdminAccountRecord[] = snap.docs
+        .map((docSnap) => {
+          const d = docSnap.data();
+          return {
+            uid: docSnap.id,
+            email: String(d.email ?? ''),
+            displayName: d.displayName ? String(d.displayName) : undefined,
+            role: 'admin' as const,
+            addedBy: d.addedBy ? String(d.addedBy) : undefined,
+            createdAtIso: d.createdAt ? timestampToIso(d.createdAt) : undefined,
+          };
+        })
+        .sort((a, b) => a.email.localeCompare(b.email));
+      onAdmins(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'admins');
+    }
+  );
+}
+
+/**
+ * Creates a brand-new Email & Password Firebase Auth user using an isolated secondary
+ * Firebase App instance (so the currently signed-in admin is NOT logged out), then
+ * registers their UID in Firestore /admins/{uid}.
+ */
+export async function createAdminAccountWithEmailPassword(params: {
+  email: string;
+  password: string;
+  displayName?: string;
+}): Promise<AdminAccountRecord> {
+  const cleanEmail = params.email.trim().toLowerCase();
+  const cleanName = clampStr(params.displayName ?? '', 100);
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('অনুগ্রহ করে একটি সঠিক ইমেইল ঠিকানা দিন।');
+  }
+  if (params.password.length < 6) {
+    throw new Error('পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।');
+  }
+
+  const secondaryName = `admin-creator-${Date.now()}`;
+  const existing = getApps().find((a) => a.name === secondaryName);
+  const secondaryApp = existing ?? initializeApp(resolvedFirebaseConfig, secondaryName);
+  const secondaryAuth = getAuth(secondaryApp);
+
+  let createdUid = '';
+  try {
+    await setPersistence(secondaryAuth, inMemoryPersistence);
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, params.password);
+    createdUid = cred.user.uid;
+    await signOut(secondaryAuth);
+  } finally {
+    await deleteApp(secondaryApp).catch(() => {});
+  }
+
+  const payload: Record<string, unknown> = {
+    email: clampStr(cleanEmail, 120),
+    role: 'admin',
+    addedBy: clampStr(auth.currentUser?.email ?? PRIMARY_ADMIN_EMAIL, 120),
+    createdAt: serverTimestamp(),
+  };
+  if (cleanName) {
+    payload.displayName = cleanName;
+  }
+
+  try {
+    await setDoc(doc(db, 'admins', createdUid), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `admins/${createdUid}`);
+  }
+
+  return {
+    uid: createdUid,
+    email: cleanEmail,
+    displayName: cleanName || undefined,
+    role: 'admin',
+    addedBy: auth.currentUser?.email ?? PRIMARY_ADMIN_EMAIL,
+    createdAtIso: new Date().toISOString(),
+  };
+}
+
+export async function addAdminByUidToFirestore(params: {
+  uid: string;
+  email: string;
+  displayName?: string;
+}): Promise<void> {
+  const cleanUid = params.uid.trim();
+  const cleanEmail = params.email.trim().toLowerCase();
+  const cleanName = clampStr(params.displayName ?? '', 100);
+
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(cleanUid)) {
+    throw new Error('সঠিক Firebase User UID দিন (শুধুমাত্র অক্ষর, সংখ্যা, - বা _)।');
+  }
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('অনুগ্রহ করে একটি সঠিক ইমেইল ঠিকানা দিন।');
+  }
+
+  const payload: Record<string, unknown> = {
+    email: clampStr(cleanEmail, 120),
+    role: 'admin',
+    addedBy: clampStr(auth.currentUser?.email ?? PRIMARY_ADMIN_EMAIL, 120),
+    createdAt: serverTimestamp(),
+  };
+  if (cleanName) {
+    payload.displayName = cleanName;
+  }
+
+  try {
+    await setDoc(doc(db, 'admins', cleanUid), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `admins/${cleanUid}`);
+  }
+}
+
+export async function removeAdminUserFromFirestore(uid: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'admins', uid));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `admins/${uid}`);
   }
 }
 
